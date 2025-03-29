@@ -1,22 +1,44 @@
 # search_session.py
 
 import os
+import os
 import uuid
 import asyncio
 import time
 import re
 import random
 import yaml
+import google.generativeai as genai
 
 from knowledge_base import KnowledgeBase, late_interaction_score, load_corpus_from_dir, load_retrieval_model, embed_text
 from web_search import download_webpages_ddg, parse_html_to_text, group_web_results_by_domain, sanitize_filename
 from aggregator import aggregate_results
 
 #############################################
-# LLM (Gemma) & Summarization / RAG utilities
+# LLM & Summarization / RAG utilities
 #############################################
 
 from ollama import chat, ChatResponse
+
+# Function to list available Gemini models supporting generateContent
+def list_gemini_models():
+    """Lists available Gemini models that support generateContent."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        print("[ERROR] GEMINI_API_KEY environment variable not set.")
+        return None # Indicate failure due to missing key
+    try:
+        genai.configure(api_key=api_key)
+        models = genai.list_models()
+        # Filter for models supporting 'generateContent'
+        supported_models = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
+        if not supported_models:
+            print("[WARN] No Gemini models found supporting 'generateContent'.")
+            return []
+        return supported_models
+    except Exception as e:
+        print(f"[ERROR] Failed to list Gemini models: {e}")
+        return None # Indicate failure
 
 def call_gemma(prompt, model="gemma2:2b", personality=None):
     system_message = ""
@@ -29,13 +51,38 @@ def call_gemma(prompt, model="gemma2:2b", personality=None):
     response: ChatResponse = chat(model=model, messages=messages)
     return response.message.content
 
+# Modified to require model_name
+def call_gemini(prompt, model_name):
+    """Calls the Gemini API with a specified model."""
+    if not model_name:
+        print("[ERROR] No Gemini model specified for the API call.")
+        return "Error: No Gemini model specified."
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        print("[ERROR] GEMINI_API_KEY environment variable not set.")
+        return "Error: Gemini API key not configured."
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(model_name)
+        response = model.generate_content(prompt)
+        # Handle potential safety blocks or empty responses
+        if not response.parts:
+             print(f"[WARN] Gemini response blocked or empty. Reason: {response.prompt_feedback}")
+             # Consider returning a more informative error or fallback
+             return f"Error: Gemini response blocked or empty. Reason: {response.prompt_feedback}"
+        return response.text
+    except Exception as e:
+        print(f"[ERROR] Gemini API call failed: {e}")
+        return f"Error: Gemini API call failed. Details: {e}"
+
 def extract_final_query(text):
     marker = "Final Enhanced Query:"
     if marker in text:
         return text.split(marker)[-1].strip()
     return text.strip()
 
-def chain_of_thought_query_enhancement(query, personality=None):
+# Modified to accept rag_model to conditionally use Gemini
+def chain_of_thought_query_enhancement(query, personality=None, rag_model="gemma"):
     prompt = (
         "You are an expert search strategist. Think step-by-step through the implications and nuances "
         "of the following query and produce a final, enhanced query that covers more angles.\n\n"
@@ -43,7 +90,19 @@ def chain_of_thought_query_enhancement(query, personality=None):
         "After your reasoning, output only the final enhanced query on a single line - SHORT AND CONCISE.\n"
         "Provide your reasoning, and at the end output the line 'Final Enhanced Query:' followed by the enhanced query."
     )
-    raw_output = call_gemma(prompt, personality=personality)
+    if rag_model == "gemini":
+        print("[INFO] Using Gemini for query enhancement.")
+        # Gemini doesn't use 'personality' in the same way, prompt needs to be self-contained
+        # Pass the selected model name
+        raw_output = call_gemini(prompt, model_name=self.selected_gemini_model)
+    else:
+        print("[INFO] Using Gemma (Ollama) for query enhancement.")
+        raw_output = call_gemma(prompt, personality=personality)
+
+    if raw_output.startswith("Error:"): # Handle potential API errors
+        print(f"[WARN] Query enhancement failed: {raw_output}. Falling back to original query.")
+        return query # Fallback to original query if enhancement fails
+
     return extract_final_query(raw_output)
 
 def summarize_text(text, max_chars=6000, personality=None):
@@ -64,14 +123,21 @@ def summarize_text(text, max_chars=6000, personality=None):
         combined = call_gemma(prompt, personality=personality)
     return combined
 
-def rag_final_answer(aggregation_prompt, rag_model="gemma", personality=None):
+# Added selected_gemini_model parameter
+def rag_final_answer(aggregation_prompt, rag_model="gemma", personality=None, selected_gemini_model=None):
     print("[INFO] Performing final RAG generation using model:", rag_model)
     if rag_model == "gemma":
         return call_gemma(aggregation_prompt, personality=personality)
     elif rag_model == "pali":
         modified_prompt = f"PALI mode analysis:\n\n{aggregation_prompt}"
         return call_gemma(modified_prompt, personality=personality)
-    else:
+    elif rag_model == "gemini":
+        # Note: Gemini doesn't have a direct 'personality' parameter like ollama's system message.
+        # The prompt itself needs to guide the desired tone if needed.
+        # Use the passed-in parameter
+        return call_gemini(aggregation_prompt, model_name=selected_gemini_model)
+    else: # Default or unknown, fall back to gemma
+        print(f"[WARN] Unknown rag_model '{rag_model}', defaulting to gemma.")
         return call_gemma(aggregation_prompt, personality=personality)
 
 def follow_up_conversation(follow_up_prompt, personality=None):
@@ -142,10 +208,12 @@ def build_toc_string(toc_nodes, indent=0):
 #########################################################
 
 class SearchSession:
+    # Added selected_gemini_model parameter
     def __init__(self, query, config, corpus_dir=None, device="cpu",
                  retrieval_model="colpali", top_k=3, web_search_enabled=False,
-                 personality=None, rag_model="gemma", max_depth=1):
+                 personality=None, rag_model="gemma", selected_gemini_model=None, max_depth=1):
         """
+        :param selected_gemini_model: The specific Gemini model chosen by the user.
         :param max_depth: Maximum recursion depth for subquery expansion.
         """
         self.query = query
@@ -157,6 +225,7 @@ class SearchSession:
         self.web_search_enabled = web_search_enabled
         self.personality = personality
         self.rag_model = rag_model
+        self.selected_gemini_model = selected_gemini_model # Store the selected model
         self.max_depth = max_depth
 
         self.query_id = str(uuid.uuid4())[:8]
@@ -165,10 +234,16 @@ class SearchSession:
 
         print(f"[INFO] Initializing SearchSession for query_id={self.query_id}")
 
-        # Enhance the query via chain-of-thought.
-        self.enhanced_query = chain_of_thought_query_enhancement(self.query, personality=self.personality)
-        if not self.enhanced_query:
-            self.enhanced_query = self.query
+        # Enhance the query via chain-of-thought, passing the selected RAG model.
+        # Pass self to the enhancement function so it can access self.selected_gemini_model
+        self.enhanced_query = self._chain_of_thought_query_enhancement(
+            self.query,
+            personality=self.personality,
+            rag_model=self.rag_model
+        )
+        # Fallback handled inside the enhancement function now
+        # if not self.enhanced_query:
+        #     self.enhanced_query = self.query
 
         # Load retrieval model.
         self.model, self.processor, self.model_type = load_retrieval_model(
@@ -197,6 +272,29 @@ class SearchSession:
         self.grouped_web_results = {}
         self.local_results = []
         self.toc_tree = []  # List of TOCNode objects for the initial subqueries
+
+    # Made this an instance method to access self.selected_gemini_model
+    def _chain_of_thought_query_enhancement(self, query, personality=None, rag_model="gemma"):
+        prompt = (
+            "You are an expert search strategist. Think step-by-step through the implications and nuances "
+            "of the following query and produce a final, enhanced query that covers more angles.\n\n"
+            f"Query: \"{query}\"\n\n"
+            "After your reasoning, output only the final enhanced query on a single line - SHORT AND CONCISE.\n"
+            "Provide your reasoning, and at the end output the line 'Final Enhanced Query:' followed by the enhanced query."
+        )
+        if rag_model == "gemini":
+            print("[INFO] Using Gemini for query enhancement.")
+            # Pass the selected model name from self
+            raw_output = call_gemini(prompt, model_name=self.selected_gemini_model)
+        else:
+            print("[INFO] Using Gemma (Ollama) for query enhancement.")
+            raw_output = call_gemma(prompt, personality=personality)
+
+        if raw_output.startswith("Error:"): # Handle potential API errors
+            print(f"[WARN] Query enhancement failed: {raw_output}. Falling back to original query.")
+            return query # Fallback to original query if enhancement fails
+
+        return extract_final_query(raw_output)
 
     async def run_session(self):
         """
@@ -346,7 +444,8 @@ class SearchSession:
 
             additional_subqueries = []
             if current_depth < self.max_depth:
-                additional_query = chain_of_thought_query_enhancement(sq_clean, personality=self.personality)
+                # Use the instance method here as well
+                additional_query = self._chain_of_thought_query_enhancement(sq_clean, personality=self.personality, rag_model=self.rag_model)
                 if additional_query and additional_query != sq_clean:
                     additional_subqueries = split_query(additional_query, max_len=self.config.get("max_query_length", 200))
 
@@ -427,7 +526,13 @@ Write the report in clear Markdown with section headings, subheadings, and refer
 Report:
 """
         print("[DEBUG] Final RAG prompt constructed. Passing to rag_final_answer()...")
-        final_answer = rag_final_answer(aggregation_prompt, rag_model=self.rag_model, personality=self.personality)
+        # Pass selected_gemini_model
+        final_answer = rag_final_answer(
+            aggregation_prompt,
+            rag_model=self.rag_model,
+            personality=self.personality,
+            selected_gemini_model=self.selected_gemini_model
+        )
         return final_answer
 
     def save_report(self, final_answer, previous_results=None, follow_up_convo=None):
