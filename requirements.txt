@@ -12,6 +12,7 @@ beautifulsoup4
 pymupdf  # PyMuPDF for PDF handling
 pytesseract
 Pillow   # for image handling
+PyQt6    # For the GUI
 
 # Optional LLM Integration
 ollama

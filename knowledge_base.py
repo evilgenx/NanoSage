@@ -63,19 +63,27 @@ def retrieve(query, corpus, model, processor, top_k=3, model_type="colpali", dev
 ##################################
 # Building a Corpus from a Folder
 ##################################
-def load_corpus_from_dir(corpus_dir, model, processor, device="cpu", model_type="colpali"):
+def load_corpus_from_dir(corpus_dir, model, processor, device="cpu", model_type="colpali", progress_callback=None): # Added progress_callback
     """
     Scan 'corpus_dir' for txt, pdf, and image files, embed their text,
     and return a list of { 'embedding':..., 'metadata':... } entries.
+    Calls progress_callback with status updates if provided.
     """
     corpus = []
     if not corpus_dir or not os.path.isdir(corpus_dir):
         return corpus
 
-    for filename in os.listdir(corpus_dir):
+    _progress = progress_callback or (lambda msg: None) # Use dummy if None
+
+    all_files = [f for f in os.listdir(corpus_dir) if os.path.isfile(os.path.join(corpus_dir, f))]
+    total_files = len(all_files)
+
+    for i, filename in enumerate(all_files):
+        _progress(f"Processing local file {i+1}/{total_files}: {filename}")
         file_path = os.path.join(corpus_dir, filename)
-        if not os.path.isfile(file_path):
-            continue
+        # No need to check isfile again, already filtered
+        # if not os.path.isfile(file_path):
+        #     continue
         text = ""
         if filename.endswith(".txt"):
             with open(file_path, "r", encoding="utf-8") as f:

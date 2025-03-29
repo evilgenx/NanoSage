@@ -6,8 +6,17 @@ import yaml
 import os
 import sys # Import sys for exiting
 
-# Import the new function
+# Import SearchSession and related functions
 from search_session import SearchSession, list_gemini_models
+
+# Conditional GUI imports
+GUI_ENABLED = True
+try:
+    from PyQt6.QtWidgets import QApplication
+    from gui import MainWindow
+except ImportError:
+    GUI_ENABLED = False
+    print("[WARN] PyQt6 or gui.py not found. GUI mode disabled.")
 
 def load_config(config_path):
     if not os.path.isfile(config_path):
@@ -17,7 +26,8 @@ def load_config(config_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Multi-step RAG pipeline with depth-limited searching.")
-    parser.add_argument("--query", type=str, required=True, help="Initial user query")
+    # Make query not strictly required initially, will check later for CLI mode
+    parser.add_argument("--query", type=str, help="Initial user query (required for CLI mode)")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to YAML configuration file")
     parser.add_argument("--corpus_dir", type=str, default=None, help="Path to local corpus folder")
     parser.add_argument("--device", type=str, default="cpu", help="Device for retrieval model (cpu or cuda)")
@@ -27,7 +37,26 @@ def main():
     parser.add_argument("--personality", type=str, default=None, help="Optional personality for Gemma (e.g. cheerful)")
     parser.add_argument("--rag_model", type=str, choices=["gemma", "pali", "gemini"], default="gemma", help="Which model to use for final RAG steps (gemma, pali, gemini)")
     parser.add_argument("--max_depth", type=int, default=1, help="Depth limit for subquery expansions")
+    parser.add_argument("--gui", action="store_true", help="Launch the graphical user interface") # Add GUI flag
     args = parser.parse_args()
+
+    # --- GUI Mode ---
+    if args.gui:
+        if not GUI_ENABLED:
+             print("[ERROR] GUI dependencies (PyQt6) are not installed or gui.py is missing. Cannot launch GUI.")
+             sys.exit(1)
+        print("[INFO] Launching NanoSage GUI...")
+        app = QApplication(sys.argv)
+        main_window = MainWindow()
+        main_window.show()
+        sys.exit(app.exec())
+
+    # --- CLI Mode (Original Logic) ---
+    print("[INFO] Running in Command-Line Interface mode.")
+
+    # Check if query is provided for CLI mode
+    if not args.query:
+        parser.error("--query is required when not using --gui")
 
     config = load_config(args.config)
 

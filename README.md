@@ -48,6 +48,19 @@ pip install --upgrade pyOpenSSL cryptography
 
 ---
 
+### 1.5. (Optional) Launch the GUI
+
+NanoSage also includes a graphical user interface (GUI) for easier interaction.
+
+1.  **Install GUI Dependencies**: Ensure you have Tkinter installed (usually included with Python). If not, install it for your system (e.g., `sudo apt-get install python3-tk` on Debian/Ubuntu).
+2.  **Run the GUI**:
+    ```bash
+    python gui.py
+    ```
+    This will open a window where you can enter your query, select options (like web search, RAG model), and start the research process without using the command line directly. Results will still be saved in the `results/` directory.
+
+---
+
 
 ### 2. Set Up Ollama & Pull the Gemma Model
 
@@ -131,6 +144,23 @@ python main.py --query "Climate change impact on economy" \
 ```
 
 This uses **Gemma 2B** to generate LLM-based summaries and the final report.
+
+#### ✨ Using Gemini API for RAG
+
+You can also leverage Google's Gemini models for the final report generation.
+
+1.  **Get an API Key**: Obtain a Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
+2.  **Set Environment Variable**: Set the `GEMINI_API_KEY` environment variable:
+    ```bash
+    export GEMINI_API_KEY='YOUR_API_KEY'
+    ```
+    *(On Windows, use `set GEMINI_API_KEY=YOUR_API_KEY` or set it via system properties.)*
+3.  **Run with Gemini**: Use the `--rag_model gemini` flag:
+    ```bash
+    python main.py --query "Latest advancements in renewable energy" \
+                   --rag_model gemini \
+                   --web_search
+    ```
 
 ---
 
@@ -284,4 +314,4 @@ If you found **NanoSage** useful for your research or project - or saved you 1 m
 ```
 
 **APA Citation:**  
-Foad, Abo Dahood. (2025). *NanoSage: A Recursive, Relevance-Driven Search and RAG Pipeline*. Retrieved from [https://github.com/masterFoad/NanoSage](https://github.com/masterFoad/NanoSage) 
+Foad, Abo Dahood. (2025). *NanoSage: A Recursive, Relevance-Driven Search and RAG Pipeline*. Retrieved from [https://github.com/masterFoad/NanoSage](https://github.com/masterFoad/NanoSage)
