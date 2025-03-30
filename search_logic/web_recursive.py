@@ -3,8 +3,9 @@ import asyncio
 from llm_providers.utils import clean_search_query, split_query
 from llm_providers.tasks import summarize_text, chain_of_thought_query_enhancement
 import toc_tree
-from knowledge_base import embed_text, late_interaction_score
+from knowledge_base import late_interaction_score # Removed embed_text
 from web_search import download_webpages_ddg, parse_html_to_text, group_web_results_by_domain, sanitize_filename
+from embeddings.base import BaseEmbedder # Added import
 
 async def perform_recursive_web_searches(
     subqueries,
@@ -15,9 +16,8 @@ async def perform_recursive_web_searches(
     resolved_settings,
     config, # Pass raw config for advanced settings
     progress_callback,
-    model, # Pass model/processor/type explicitly
-    processor,
-    model_type
+    embedder: BaseEmbedder # Changed signature to use embedder
+    # Removed model, processor, model_type
 ):
     """
     Recursively perform web searches for each subquery up to max_depth.
@@ -38,18 +38,9 @@ async def perform_recursive_web_searches(
         # Create a TOC node
         toc_node = toc_tree.TOCNode(query_text=sq_clean, depth=current_depth) # Use toc_tree
 
-        # Embed subquery for relevance check using resolved settings
-        node_embedding = embed_text(
-            text=sq_clean,
-            model=model,
-            processor=processor,
-            model_type=model_type,
-            embedding_model_name=resolved_settings['embedding_model'], # Use resolved embedding model
-            device=resolved_settings['device'], # Use resolved device
-            # Pass API keys explicitly if embed_text requires them
-            gemini_api_key=resolved_settings.get('gemini_api_key'),
-            openrouter_api_key=resolved_settings.get('openrouter_api_key')
-        )
+        # Embed subquery for relevance check using the provided embedder
+        node_embedding = embedder.embed(sq_clean) # Use embedder.embed
+
         if node_embedding is None:
              print(f"[WARN] Failed to embed subquery '{sq_clean[:50]}...' for relevance check. Skipping branch.")
              continue
@@ -99,18 +90,8 @@ async def perform_recursive_web_searches(
             max_embed_chars = config.get('advanced', {}).get("summarization_chunk_size", 2048) # Reuse summarization chunk size as a proxy
             limited_text = raw_text[:max_embed_chars] # Limit text length for embedding if needed
 
-            # Embed the web page content using resolved settings
-            emb = embed_text(
-                text=limited_text,
-                model=model,
-                processor=processor,
-                model_type=model_type,
-                embedding_model_name=resolved_settings['embedding_model'], # Use resolved embedding model
-                device=resolved_settings['device'], # Use resolved device
-                # Pass API keys explicitly if embed_text requires them
-                gemini_api_key=resolved_settings.get('gemini_api_key'),
-                openrouter_api_key=resolved_settings.get('openrouter_api_key')
-            )
+            # Embed the web page content using the provided embedder
+            emb = embedder.embed(limited_text) # Use embedder.embed
 
             if emb is not None:
                 entry = {
@@ -132,19 +113,22 @@ async def perform_recursive_web_searches(
         # Summarize using resolved settings
         progress_callback(f"Summarizing {len(branch_web_results)} web results for '{sq_clean[:50]}...'")
         branch_snippets = " ".join([r.get("snippet", "") for r in branch_web_results])
-        # Pass all resolved model params to summarize_text
+        # Assemble llm_config for the summarization task
+        provider = resolved_settings.get('rag_model', 'gemma')
+        model_id = resolved_settings.get(f"{provider}_model_id") # e.g., gemini_model_id
+        api_key = resolved_settings.get(f"{provider}_api_key") # e.g., gemini_api_key
+        llm_config_for_summary = {
+            "provider": provider,
+            "model_id": model_id,
+            "api_key": api_key,
+            "personality": resolved_settings.get('personality')
+        }
         # Use resolved summarization_chunk_size from config (assuming it might be under 'advanced')
         max_chars = config.get('advanced', {}).get("summarization_chunk_size", 6000)
         toc_node.summary = summarize_text(
             branch_snippets,
-            max_chars=max_chars,
-            personality=resolved_settings['personality'],
-            rag_model=resolved_settings['rag_model'],
-            selected_gemini_model=resolved_settings['gemini_model_id'],
-            selected_openrouter_model=resolved_settings['openrouter_model_id'],
-            # Pass API keys explicitly if summarize_text requires them
-            gemini_api_key=resolved_settings.get('gemini_api_key'),
-            openrouter_api_key=resolved_settings.get('openrouter_api_key')
+            llm_config=llm_config_for_summary,
+            max_chars=max_chars
         )
         toc_node.web_results = branch_web_results
         # Note: We don't store corpus entries directly in TOC node anymore, they go straight to KB
@@ -153,16 +137,20 @@ async def perform_recursive_web_searches(
         # Use resolved max_depth
         if current_depth < max_depth:
             progress_callback(f"Generating potential sub-subqueries for '{sq_clean[:50]}...'")
-            # Use the chain_of_thought_query_enhancement function directly, passing all resolved model params
+            # Assemble llm_config for the enhancement task
+            provider = resolved_settings.get('rag_model', 'gemma')
+            model_id = resolved_settings.get(f"{provider}_model_id") # e.g., gemini_model_id
+            api_key = resolved_settings.get(f"{provider}_api_key") # e.g., gemini_api_key
+            llm_config_for_enhancement = {
+                "provider": provider,
+                "model_id": model_id,
+                "api_key": api_key,
+                "personality": resolved_settings.get('personality')
+            }
+            # Use the chain_of_thought_query_enhancement function directly
             additional_query = chain_of_thought_query_enhancement(
                 sq_clean,
-                personality=resolved_settings['personality'],
-                rag_model=resolved_settings['rag_model'],
-                selected_gemini_model=resolved_settings['gemini_model_id'],
-                selected_openrouter_model=resolved_settings['openrouter_model_id'],
-                # Pass API keys explicitly if function requires them
-                gemini_api_key=resolved_settings.get('gemini_api_key'),
-                openrouter_api_key=resolved_settings.get('openrouter_api_key')
+                llm_config=llm_config_for_enhancement
             )
             if additional_query and additional_query != sq_clean:
                 # Use resolved max_query_length from config (assuming it might be under 'advanced')
@@ -182,9 +170,8 @@ async def perform_recursive_web_searches(
                 resolved_settings=resolved_settings,
                 config=config,
                 progress_callback=progress_callback,
-                model=model,
-                processor=processor,
-                model_type=model_type
+                embedder=embedder # Pass embedder down
+                # Removed model, processor, model_type
             )
             # Extend the current branch's results and entries
             branch_web_results.extend(deeper_web_results)

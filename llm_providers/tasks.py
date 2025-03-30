@@ -7,9 +7,15 @@ from .openrouter import call_openrouter
 from .ollama import call_gemma
 from .utils import extract_final_query
 
-# Modified to accept rag_model, selected_gemini_model, selected_openrouter_model, and API keys
-def chain_of_thought_query_enhancement(query, personality=None, rag_model="gemma", selected_gemini_model=None, selected_openrouter_model=None, gemini_api_key=None, openrouter_api_key=None):
+# Modified to accept llm_config dictionary
+def chain_of_thought_query_enhancement(query, llm_config: dict = {}):
     """Enhances a query using a step-by-step thinking process with the specified LLM."""
+    # Extract config with defaults
+    provider = llm_config.get("provider", "gemma")
+    model_id = llm_config.get("model_id") # Specific model ID for the provider
+    api_key = llm_config.get("api_key")
+    personality = llm_config.get("personality")
+
     prompt = (
         "You are an expert search strategist. Think step-by-step through the implications and nuances "
         "of the following query and produce a final, enhanced query that covers more angles.\n\n"
@@ -19,26 +25,25 @@ def chain_of_thought_query_enhancement(query, personality=None, rag_model="gemma
     )
     raw_output = ""
     try:
-        if rag_model == "gemini":
+        if provider == "gemini":
             print("[INFO] Using Gemini for query enhancement.")
-            if not selected_gemini_model:
+            if not model_id:
                 print("[ERROR] Gemini selected for query enhancement, but no model specified.")
                 return query # Fallback
-            # Pass the selected model name and API key
-            raw_output = call_gemini(prompt, model_name=selected_gemini_model, gemini_api_key=gemini_api_key)
-        elif rag_model == "openrouter":
+            raw_output = call_gemini(prompt, model_name=model_id, gemini_api_key=api_key)
+        elif provider == "openrouter":
             print("[INFO] Using OpenRouter for query enhancement.")
-            if not selected_openrouter_model:
+            if not model_id:
                  print("[WARN] No OpenRouter model specified for query enhancement, falling back to default.")
                  return query # Fallback
-            # Pass the selected model name, personality, and API key
-            raw_output = call_openrouter(prompt, model=selected_openrouter_model, personality=personality, openrouter_api_key=openrouter_api_key)
+            raw_output = call_openrouter(prompt, model=model_id, personality=personality, openrouter_api_key=api_key)
         else: # Default to gemma/ollama
-            if rag_model != "gemma":
-                print(f"[WARN] Unknown rag_model '{rag_model}' for query enhancement, defaulting to gemma.")
+            if provider != "gemma":
+                print(f"[WARN] Unknown provider '{provider}' for query enhancement, defaulting to gemma.")
             print("[INFO] Using Gemma (Ollama) for query enhancement.")
-            # Assuming call_gemma doesn't need API key for local Ollama
-            raw_output = call_gemma(prompt, personality=personality)
+            # Pass model_id to gemma if provided, otherwise it uses its default
+            gemma_model = model_id or "gemma2:2b" # Example default if not specified
+            raw_output = call_gemma(prompt, model=gemma_model, personality=personality)
 
         if not raw_output or raw_output.startswith("Error:"): # Handle potential API errors or empty output
             print(f"[WARN] Query enhancement failed or returned error: {raw_output}. Falling back to original query.")
@@ -47,36 +52,41 @@ def chain_of_thought_query_enhancement(query, personality=None, rag_model="gemma
         return extract_final_query(raw_output)
 
     except Exception as e:
-        print(f"[ERROR] Exception during query enhancement with {rag_model}: {e}. Falling back to original query.")
+        print(f"[ERROR] Exception during query enhancement with {provider}: {e}. Falling back to original query.")
         # Log the exception details if needed
         return query # Fallback in case of unexpected errors during the call
 
-# Modified summarize_text to support different RAG models and accept API keys
-def summarize_text(text, max_chars=6000, personality=None, rag_model="gemma", selected_gemini_model=None, selected_openrouter_model=None, gemini_api_key=None, openrouter_api_key=None):
-    """Summarizes text, potentially chunking, using the specified RAG model."""
+# Modified summarize_text to accept llm_config dictionary (reordered params)
+def summarize_text(text, llm_config: dict = {}, max_chars=6000):
+    """Summarizes text, potentially chunking, using the specified RAG model configured in llm_config."""
+
+    # Extract config once for the helper function
+    provider = llm_config.get("provider", "gemma")
+    model_id = llm_config.get("model_id")
+    api_key = llm_config.get("api_key")
+    personality = llm_config.get("personality")
 
     def _call_selected_model(prompt_text):
-        """Internal helper to call the correct model based on rag_model."""
+        """Internal helper to call the correct model based on pre-extracted config."""
         try:
-            if rag_model == "gemini":
-                if not selected_gemini_model:
+            if provider == "gemini":
+                if not model_id:
                     print("[ERROR] Gemini selected for summarization, but no model specified.")
                     return "Error: Gemini model not specified for summarization."
-                # Pass API key
-                return call_gemini(prompt_text, model_name=selected_gemini_model, gemini_api_key=gemini_api_key)
-            elif rag_model == "openrouter":
-                if not selected_openrouter_model:
+                return call_gemini(prompt_text, model_name=model_id, gemini_api_key=api_key)
+            elif provider == "openrouter":
+                if not model_id:
                     print("[ERROR] OpenRouter selected for summarization, but no model specified.")
                     return "Error: OpenRouter model not specified for summarization."
-                # Pass API key
-                return call_openrouter(prompt_text, model=selected_openrouter_model, personality=personality, openrouter_api_key=openrouter_api_key)
+                return call_openrouter(prompt_text, model=model_id, personality=personality, openrouter_api_key=api_key)
             else: # Default to gemma/ollama
-                if rag_model != "gemma":
-                     print(f"[WARN] Unknown rag_model '{rag_model}' for summarization, defaulting to gemma.")
-                return call_gemma(prompt_text, personality=personality)
+                if provider != "gemma":
+                     print(f"[WARN] Unknown provider '{provider}' for summarization, defaulting to gemma.")
+                gemma_model = model_id or "gemma2:2b" # Example default
+                return call_gemma(prompt_text, model=gemma_model, personality=personality)
         except Exception as e:
-            print(f"[ERROR] Exception during _call_selected_model ({rag_model}): {e}")
-            return f"Error: Failed to call {rag_model} model - {e}"
+            print(f"[ERROR] Exception during _call_selected_model ({provider}): {e}")
+            return f"Error: Failed to call {provider} model - {e}"
 
 
     if not text or not text.strip():
@@ -92,7 +102,7 @@ def summarize_text(text, max_chars=6000, personality=None, rag_model="gemma", se
     # If text is longer than max_chars, chunk it
     chunks = [text[i:i+max_chars] for i in range(0, len(text), max_chars)]
     summaries = []
-    print(f"[INFO] Summarizing text in {len(chunks)} chunks using {rag_model}...")
+    print(f"[INFO] Summarizing text in {len(chunks)} chunks using {provider}...")
     for i, chunk in enumerate(chunks):
         prompt = f"Summarize part {i+1}/{len(chunks)}:\n\n{chunk}"
         summary = _call_selected_model(prompt)
@@ -107,7 +117,7 @@ def summarize_text(text, max_chars=6000, personality=None, rag_model="gemma", se
     combined = "\n".join(summaries)
     # Check if combined summary still needs further summarization
     if len(combined) > max_chars:
-        print(f"[INFO] Combining {len(summaries)} summaries into a final summary using {rag_model}...")
+        print(f"[INFO] Combining {len(summaries)} summaries into a final summary using {provider}...")
         prompt = f"Combine these summaries into one concise final summary:\n\n{combined}"
         final_summary = _call_selected_model(prompt)
         # Return final summary, even if it's an error message
@@ -117,60 +127,70 @@ def summarize_text(text, max_chars=6000, personality=None, rag_model="gemma", se
         return combined
 
 
-# Added selected_gemini_model, selected_openrouter_model parameters, and API keys
-def rag_final_answer(aggregation_prompt, rag_model="gemma", personality=None, selected_gemini_model=None, selected_openrouter_model=None, gemini_api_key=None, openrouter_api_key=None):
-    """Generates the final answer using the specified RAG model."""
-    print("[INFO] Performing final RAG generation using model:", rag_model)
+# Modified rag_final_answer to accept llm_config dictionary
+def rag_final_answer(aggregation_prompt, llm_config: dict = {}):
+    """Generates the final answer using the specified RAG model configured in llm_config."""
+    # Extract config with defaults
+    provider = llm_config.get("provider", "gemma")
+    model_id = llm_config.get("model_id")
+    api_key = llm_config.get("api_key")
+    personality = llm_config.get("personality")
+
+    print("[INFO] Performing final RAG generation using provider:", provider)
     try:
-        if rag_model == "gemma":
-            # Assuming call_gemma doesn't need API key for local Ollama
-            return call_gemma(aggregation_prompt, personality=personality)
-        elif rag_model == "pali": # Note: 'pali' seems to just modify the prompt for gemma here
+        if provider == "gemma":
+            gemma_model = model_id or "gemma2:2b" # Example default
+            return call_gemma(aggregation_prompt, model=gemma_model, personality=personality)
+        elif provider == "pali": # Note: 'pali' seems to just modify the prompt for gemma here
             modified_prompt = f"PALI mode analysis:\n\n{aggregation_prompt}"
             print("[INFO] Using Gemma (Ollama) with PALI mode prompt.")
-            return call_gemma(modified_prompt, personality=personality)
-        elif rag_model == "gemini":
-            if not selected_gemini_model:
+            gemma_model = model_id or "gemma2:2b" # Example default
+            return call_gemma(modified_prompt, model=gemma_model, personality=personality)
+        elif provider == "gemini":
+            if not model_id:
                 print("[ERROR] Gemini selected for RAG, but no model specified.")
                 return "Error: Gemini model not specified for RAG."
-            # Pass API key
-            return call_gemini(aggregation_prompt, model_name=selected_gemini_model, gemini_api_key=gemini_api_key)
-        elif rag_model == "openrouter":
+            return call_gemini(aggregation_prompt, model_name=model_id, gemini_api_key=api_key)
+        elif provider == "openrouter":
             print("[INFO] Using OpenRouter for final RAG generation.")
-            if not selected_openrouter_model:
+            if not model_id:
                  print("[ERROR] No OpenRouter model specified for RAG.")
                  return "Error: No OpenRouter model specified."
-            # Pass the selected model name and API key
-            return call_openrouter(aggregation_prompt, model=selected_openrouter_model, personality=personality, openrouter_api_key=openrouter_api_key)
+            return call_openrouter(aggregation_prompt, model=model_id, personality=personality, openrouter_api_key=api_key)
         else: # Default or unknown, fall back to gemma
-            print(f"[WARN] Unknown rag_model '{rag_model}', defaulting to gemma.")
-            # Assuming call_gemma doesn't need API key for local Ollama
-            return call_gemma(aggregation_prompt, personality=personality)
+            print(f"[WARN] Unknown provider '{provider}', defaulting to gemma.")
+            gemma_model = model_id or "gemma2:2b" # Example default
+            return call_gemma(aggregation_prompt, model=gemma_model, personality=personality)
     except Exception as e:
-        print(f"[ERROR] Exception during RAG final answer generation ({rag_model}): {e}")
-        return f"Error: Failed to generate final answer with {rag_model} - {e}"
+        print(f"[ERROR] Exception during RAG final answer generation ({provider}): {e}")
+        return f"Error: Failed to generate final answer with {provider} - {e}"
 
-# Modified follow_up_conversation to support different RAG models and accept API keys
-def follow_up_conversation(follow_up_prompt, personality=None, rag_model="gemma", selected_gemini_model=None, selected_openrouter_model=None, gemini_api_key=None, openrouter_api_key=None):
-    """Handles follow-up conversation prompts using the specified RAG model."""
-    print(f"[INFO] Handling follow-up conversation using {rag_model}...")
+# Modified follow_up_conversation to accept llm_config dictionary
+def follow_up_conversation(follow_up_prompt, llm_config: dict = {}):
+    """Handles follow-up conversation prompts using the specified RAG model configured in llm_config."""
+    # Extract config with defaults
+    provider = llm_config.get("provider", "gemma")
+    model_id = llm_config.get("model_id")
+    api_key = llm_config.get("api_key")
+    personality = llm_config.get("personality")
+
+    print(f"[INFO] Handling follow-up conversation using {provider}...")
     try:
-        if rag_model == "gemini":
-            if not selected_gemini_model:
+        if provider == "gemini":
+            if not model_id:
                 print("[ERROR] Gemini selected for follow-up, but no model specified.")
                 return "Error: Gemini model not specified for follow-up."
-            # Pass API key
-            return call_gemini(follow_up_prompt, model_name=selected_gemini_model, gemini_api_key=gemini_api_key)
-        elif rag_model == "openrouter":
-            if not selected_openrouter_model:
+            return call_gemini(follow_up_prompt, model_name=model_id, gemini_api_key=api_key)
+        elif provider == "openrouter":
+            if not model_id:
                 print("[ERROR] OpenRouter selected for follow-up, but no model specified.")
                 return "Error: OpenRouter model not specified for follow-up."
-            # Pass API key
-            return call_openrouter(follow_up_prompt, model=selected_openrouter_model, personality=personality, openrouter_api_key=openrouter_api_key)
+            return call_openrouter(follow_up_prompt, model=model_id, personality=personality, openrouter_api_key=api_key)
         else: # Default to gemma/ollama
-            if rag_model != "gemma":
-                print(f"[WARN] Unknown rag_model '{rag_model}' for follow-up, defaulting to gemma.")
-            return call_gemma(follow_up_prompt, personality=personality)
+            if provider != "gemma":
+                print(f"[WARN] Unknown provider '{provider}' for follow-up, defaulting to gemma.")
+            gemma_model = model_id or "gemma2:2b" # Example default
+            return call_gemma(follow_up_prompt, model=gemma_model, personality=personality)
     except Exception as e:
-        print(f"[ERROR] Exception during follow-up conversation ({rag_model}): {e}")
-        return f"Error: Failed to handle follow-up with {rag_model} - {e}"
+        print(f"[ERROR] Exception during follow-up conversation ({provider}): {e}")
+        return f"Error: Failed to handle follow-up with {provider} - {e}"

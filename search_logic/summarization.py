@@ -19,19 +19,22 @@ def summarize_web_results(web_results, config, resolved_settings, progress_callb
          return "No web results found or summarized.", reference_links # Return empty links too
 
     progress_callback("Calling LLM to summarize web results...")
-    # Pass all resolved model params to summarize_text
+    # Assemble llm_config for the summarization task
+    provider = resolved_settings.get('rag_model', 'gemma')
+    model_id = resolved_settings.get(f"{provider}_model_id") # e.g., gemini_model_id
+    api_key = resolved_settings.get(f"{provider}_api_key") # e.g., gemini_api_key
+    llm_config_for_summary = {
+        "provider": provider,
+        "model_id": model_id,
+        "api_key": api_key,
+        "personality": resolved_settings.get('personality')
+    }
     # Use resolved summarization_chunk_size from config (assuming it might be under 'advanced')
     max_chars = config.get('advanced', {}).get("summarization_chunk_size", 6000)
     summary = summarize_text(
         text,
-        max_chars=max_chars,
-        personality=resolved_settings['personality'],
-        rag_model=resolved_settings['rag_model'],
-        selected_gemini_model=resolved_settings['gemini_model_id'],
-        selected_openrouter_model=resolved_settings['openrouter_model_id'],
-        # Pass API keys explicitly if summarize_text requires them
-        gemini_api_key=resolved_settings.get('gemini_api_key'),
-        openrouter_api_key=resolved_settings.get('openrouter_api_key')
+        llm_config=llm_config_for_summary,
+        max_chars=max_chars
     )
     progress_callback("Finished summarizing web results.")
     return summary, reference_links
@@ -51,19 +54,22 @@ def summarize_local_results(local_results, config, resolved_settings, progress_c
          return "No local documents found or summarized."
 
     progress_callback("Calling LLM to summarize local results...")
-    # Pass all resolved model params to summarize_text
+    # Assemble llm_config for the summarization task
+    provider = resolved_settings.get('rag_model', 'gemma')
+    model_id = resolved_settings.get(f"{provider}_model_id") # e.g., gemini_model_id
+    api_key = resolved_settings.get(f"{provider}_api_key") # e.g., gemini_api_key
+    llm_config_for_summary = {
+        "provider": provider,
+        "model_id": model_id,
+        "api_key": api_key,
+        "personality": resolved_settings.get('personality')
+    }
     # Use resolved summarization_chunk_size from config (assuming it might be under 'advanced')
     max_chars = config.get('advanced', {}).get("summarization_chunk_size", 6000)
     summary = summarize_text(
         text,
-        max_chars=max_chars,
-        personality=resolved_settings['personality'],
-        rag_model=resolved_settings['rag_model'],
-        selected_gemini_model=resolved_settings['gemini_model_id'],
-        selected_openrouter_model=resolved_settings['openrouter_model_id'],
-        # Pass API keys explicitly if summarize_text requires them
-        gemini_api_key=resolved_settings.get('gemini_api_key'),
-        openrouter_api_key=resolved_settings.get('openrouter_api_key')
+        llm_config=llm_config_for_summary,
+        max_chars=max_chars
     )
     progress_callback("Finished summarizing local results.")
     return summary

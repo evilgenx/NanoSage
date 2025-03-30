@@ -55,16 +55,19 @@ Report:
     # Use resolved RAG model
     progress_callback(f"Calling final RAG model ({resolved_settings['rag_model']})...")
     print("[DEBUG] Final RAG prompt constructed. Passing to rag_final_answer()...")
-    # Pass all resolved model params to rag_final_answer
+    # Assemble llm_config for the final RAG task
+    provider = resolved_settings.get('rag_model', 'gemma')
+    model_id = resolved_settings.get(f"{provider}_model_id") # e.g., gemini_model_id
+    api_key = resolved_settings.get(f"{provider}_api_key") # e.g., gemini_api_key
+    llm_config_for_rag = {
+        "provider": provider,
+        "model_id": model_id,
+        "api_key": api_key,
+        "personality": resolved_settings.get('personality')
+    }
     final_answer = rag_final_answer(
         aggregation_prompt,
-        rag_model=resolved_settings['rag_model'],
-        personality=resolved_settings['personality'],
-        selected_gemini_model=resolved_settings['gemini_model_id'],
-        selected_openrouter_model=resolved_settings['openrouter_model_id'],
-        # Pass API keys explicitly if rag_final_answer requires them
-        gemini_api_key=resolved_settings.get('gemini_api_key'),
-        openrouter_api_key=resolved_settings.get('openrouter_api_key')
+        llm_config=llm_config_for_rag
         # Consider adding progress_callback to rag_final_answer if it's long
     )
     progress_callback("Final RAG generation complete.")

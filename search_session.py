@@ -4,16 +4,18 @@ import os
 import uuid
 import asyncio
 import random
+import traceback # For more detailed error logging
 
-# Import necessary components from updated knowledge_base
-from knowledge_base import KnowledgeBase, late_interaction_score, embed_text
+# Import necessary components
+from knowledge_base import KnowledgeBase # embed_text is removed, late_interaction_score unused here
 from web_search import download_webpages_ddg, parse_html_to_text, group_web_results_by_domain, sanitize_filename
 from aggregator import aggregate_results # Keep for save_report call initially
-# Import specific functions from the new structure
+# Import specific functions from LLM providers and utils
 from llm_providers.tasks import chain_of_thought_query_enhancement
 from llm_providers.utils import clean_search_query
 import toc_tree
-# Import new modules
+# Import new modules/factories
+from embeddings.factory import create_embedder # Import the embedder factory
 from search_logic import web_recursive, subquery as subquery_logic, summarization, reporting
 
 #########################################################
@@ -51,60 +53,61 @@ class SearchSession:
 
         # Enhance the query via chain-of-thought using resolved settings
         self.progress_callback("Enhancing query using chain-of-thought...")
+        # Assemble llm_config for the enhancement task
+        provider = self.resolved_settings.get('rag_model', 'gemma')
+        model_id = self.resolved_settings.get(f"{provider}_model_id") # e.g., gemini_model_id
+        api_key = self.resolved_settings.get(f"{provider}_api_key") # e.g., gemini_api_key
+        llm_config_for_enhancement = {
+            "provider": provider,
+            "model_id": model_id,
+            "api_key": api_key,
+            "personality": self.resolved_settings.get('personality')
+        }
         self.enhanced_query = chain_of_thought_query_enhancement(
             self.query,
-            personality=self.resolved_settings['personality'],
-            rag_model=self.resolved_settings['rag_model'],
-            selected_gemini_model=self.resolved_settings['gemini_model_id'],
-            selected_openrouter_model=self.resolved_settings['openrouter_model_id'],
-            # Pass API keys explicitly if llm_utils functions require them
-            gemini_api_key=self.resolved_settings.get('gemini_api_key'),
-            openrouter_api_key=self.resolved_settings.get('openrouter_api_key')
+            llm_config=llm_config_for_enhancement
         )
         self.progress_callback(f"Enhanced Query: {self.enhanced_query}")
 
-        # Initialize KnowledgeBase using resolved settings
-        self.progress_callback(f"Initializing KnowledgeBase with device='{self.resolved_settings['device']}', model='{self.resolved_settings['embedding_model']}'...")
-        print(f"[INFO] Initializing KnowledgeBase with device='{self.resolved_settings['device']}', model='{self.resolved_settings['embedding_model']}'")
+        # --- Initialize Embedder ---
+        try:
+            self.progress_callback(f"Creating embedder for model='{self.resolved_settings['embedding_model']}' on device='{self.resolved_settings['device']}'...")
+            self.embedder = create_embedder(
+                embedding_model_name=self.resolved_settings['embedding_model'],
+                device=self.resolved_settings['device']
+            )
+        except (ValueError, ImportError) as e:
+            self.progress_callback(f"[CRITICAL] Failed to create embedder: {e}. Aborting.")
+            print(f"[ERROR] Failed to create embedder: {e}\n{traceback.format_exc()}")
+            raise # Re-raise the critical error
+
+        # --- Initialize KnowledgeBase with the embedder ---
+        self.progress_callback(f"Initializing KnowledgeBase...")
         self.kb = KnowledgeBase(
-            device=self.resolved_settings['device'],
-            embedding_model_name=self.resolved_settings['embedding_model'],
-            # API keys are not needed by KB constructor, but by embedding functions called later
+            embedder=self.embedder,
             progress_callback=self.progress_callback
         )
-        # Store model_type from KB for convenience in embedding calls later
-        self.model_type = self.kb.model_type
-        self.model = self.kb.model # Might be None for API
-        self.processor = self.kb.processor # Might be None for API
+        # Removed self.model_type, self.model, self.processor storage
 
-        # Compute the overall enhanced query embedding once *after* KB is initialized.
+        # Compute the overall enhanced query embedding using the embedder
         self.progress_callback("Computing embedding for enhanced query...")
         print("[INFO] Computing embedding for enhanced query...")
-        self.enhanced_query_embedding = embed_text(
-            text=self.enhanced_query,
-            model=self.model,
-            processor=self.processor,
-            model_type=self.model_type,
-            embedding_model_name=self.resolved_settings['embedding_model'], # Use resolved embedding model
-            device=self.resolved_settings['device'], # Use resolved device
-            # Pass API keys explicitly if embed_text requires them
-            gemini_api_key=self.resolved_settings.get('gemini_api_key'),
-            openrouter_api_key=self.resolved_settings.get('openrouter_api_key')
-        )
-        if self.enhanced_query_embedding is None:
-             # Handle error - maybe raise an exception or log a critical error
-             self.progress_callback("[CRITICAL] Failed to compute initial query embedding. Aborting.")
-             raise ValueError("Failed to compute initial query embedding.")
+        try:
+            self.enhanced_query_embedding = self.embedder.embed(self.enhanced_query)
+            if self.enhanced_query_embedding is None:
+                # Handle embedding failure
+                self.progress_callback("[CRITICAL] Failed to compute initial query embedding (returned None). Aborting.")
+                raise ValueError("Failed to compute initial query embedding.")
+        except Exception as e:
+             self.progress_callback(f"[CRITICAL] Exception during initial query embedding: {e}. Aborting.")
+             print(f"[ERROR] Exception during initial query embedding: {e}\n{traceback.format_exc()}")
+             raise ValueError(f"Failed to compute initial query embedding: {e}") from e
 
 
         # Build local corpus if directory is provided using resolved setting
         if self.resolved_settings['corpus_dir']:
-            # Pass API keys to build_from_directory
-            self.kb.build_from_directory(
-                self.resolved_settings['corpus_dir'],
-                gemini_api_key=self.resolved_settings.get('gemini_api_key'),
-                openrouter_api_key=self.resolved_settings.get('openrouter_api_key')
-            )
+            # KnowledgeBase now uses its embedder internally, no need to pass keys/models
+            self.kb.build_from_directory(self.resolved_settings['corpus_dir'])
         else:
             self.progress_callback("No local corpus directory specified.")
 
@@ -134,15 +137,14 @@ class SearchSession:
         if self.config.get('advanced', {}).get("monte_carlo_search", True):
             self.progress_callback("Performing Monte Carlo subquery sampling...")
             initial_subqueries = subquery_logic.perform_monte_carlo_subqueries(
-                parent_query=plain_enhanced_query, # Pass original query if needed
+                parent_query=plain_enhanced_query,
                 subqueries=initial_subqueries,
                 config=self.config,
                 resolved_settings=self.resolved_settings,
                 enhanced_query_embedding=self.enhanced_query_embedding,
                 progress_callback=self.progress_callback,
-                model=self.model,
-                processor=self.processor,
-                model_type=self.model_type
+                embedder=self.embedder # Pass embedder instance
+                # Removed model, processor, model_type
             )
             self.progress_callback(f"Selected {len(initial_subqueries)} subqueries via Monte Carlo.")
 
@@ -158,9 +160,8 @@ class SearchSession:
                 resolved_settings=self.resolved_settings,
                 config=self.config,
                 progress_callback=self.progress_callback,
-                model=self.model,
-                processor=self.processor,
-                model_type=self.model_type
+                embedder=self.embedder # Pass embedder instance
+                # Removed model, processor, model_type
             )
             self.web_results = web_results
             self.grouped_web_results = grouped
@@ -177,12 +178,10 @@ class SearchSession:
         # Use resolved top_k
         self.progress_callback(f"Retrieving top {self.resolved_settings['top_k']} documents from knowledge base...")
         print(f"[INFO] Retrieving top {self.resolved_settings['top_k']} documents for final answer.")
-        # Pass API keys to search method
+        # KB.search now uses its internal embedder, no need for keys/models
         self.local_results = self.kb.search(
             self.enhanced_query,
-            top_k=self.resolved_settings['top_k'],
-            gemini_api_key=self.resolved_settings.get('gemini_api_key'),
-            openrouter_api_key=self.resolved_settings.get('openrouter_api_key')
+            top_k=self.resolved_settings['top_k']
         )
         self.progress_callback(f"Retrieved {len(self.local_results)} documents from knowledge base.")
 

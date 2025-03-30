@@ -1,6 +1,7 @@
 import random
 from llm_providers.utils import clean_search_query, split_query
-from knowledge_base import embed_text, late_interaction_score
+from knowledge_base import late_interaction_score # Removed embed_text
+from embeddings.base import BaseEmbedder # Added for type hinting
 
 def generate_initial_subqueries(enhanced_query, config):
     """Generates initial subqueries by splitting the enhanced query."""
@@ -18,9 +19,8 @@ def perform_monte_carlo_subqueries(
     resolved_settings,
     enhanced_query_embedding,
     progress_callback,
-    model,
-    processor,
-    model_type
+    embedder: BaseEmbedder # Added embedder parameter
+    # Removed model, processor, model_type
 ):
     """
     Simple Monte Carlo approach:
@@ -35,18 +35,8 @@ def perform_monte_carlo_subqueries(
         sq_clean = clean_search_query(sq) # Use clean_search_query from utils
         if not sq_clean:
             continue
-        # Embed the subquery using the unified embed_text function
-        node_emb = embed_text(
-            text=sq_clean,
-            model=model,
-            processor=processor,
-            model_type=model_type,
-            embedding_model_name=resolved_settings['embedding_model'], # Use resolved embedding model
-            device=resolved_settings['device'], # Use resolved device
-            # Pass API keys explicitly if embed_text requires them
-            gemini_api_key=resolved_settings.get('gemini_api_key'),
-            openrouter_api_key=resolved_settings.get('openrouter_api_key')
-        )
+        # Embed the subquery using the provided embedder instance
+        node_emb = embedder.embed(text=sq_clean) # Use embedder.embed()
         if node_emb is None:
             print(f"[WARN] MC: Failed to embed subquery '{sq_clean[:30]}...'. Skipping.")
             continue
