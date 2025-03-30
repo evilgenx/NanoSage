@@ -1,203 +1,28 @@
 #!/usr/bin/env python3
-# gui.py
+# gui/main_window.py
 
 import sys
 import os
-import asyncio
 import subprocess # To open files/folders
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox,
     QCheckBox, QFileDialog, QMessageBox, QGroupBox, QFormLayout,
     QSizePolicy
 )
-from PyQt6.QtCore import QThread, pyqtSignal, Qt, QObject
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon # Optional: for window icon
 
-# Assuming search_session and main are in the same directory or Python path
+# Import worker threads using relative import
 try:
-    from search_session import SearchSession
-    # Import generative and embedding model listing functions
-    from llm_utils import (
-        list_gemini_models, list_openrouter_models,
-        list_gemini_embedding_models, list_openrouter_embedding_models
+    from .workers import (
+        SearchWorker, GeminiFetcher, OpenRouterFetcher
+        # Removed GeminiEmbeddingFetcher, OpenRouterEmbeddingFetcher as they are no longer used
     )
-    from main import load_config # Import load_config from main.py
 except ImportError as e:
-    print(f"Error importing from search_session, llm_utils or main: {e}")
-    print("Ensure search_session.py, llm_utils.py, main.py are in the same directory or accessible via PYTHONPATH.")
+    print(f"Error importing workers in main_window.py: {e}")
+    # Handle appropriately, maybe raise or show error in GUI if possible later
     sys.exit(1)
-
-# --- Worker Threads ---
-
-class SearchWorker(QThread):
-    """Runs the SearchSession in a separate thread."""
-    progress_updated = pyqtSignal(str)
-    search_complete = pyqtSignal(str) # Emits the report path
-    error_occurred = pyqtSignal(str)
-
-    def __init__(self, params, parent=None):
-        super().__init__(parent)
-        self.params = params
-        self._progress_callback_proxy = None # To hold the proxy object
-
-    def run(self):
-        """Executes the search session."""
-        try:
-            # Create a proxy object to safely emit signals from the asyncio loop
-            class ProgressCallbackProxy(QObject):
-                progress_signal = pyqtSignal(str)
-
-                def __call__(self, message):
-                    self.progress_signal.emit(message)
-
-            self._progress_callback_proxy = ProgressCallbackProxy()
-            self._progress_callback_proxy.progress_signal.connect(self.progress_updated.emit)
-
-            self.progress_updated.emit("Initializing search session...")
-
-            # Load config (assuming config.yaml exists or is handled)
-            config = load_config(self.params.get("config_path", "config.yaml"))
-
-            # Determine which model was actually selected based on rag_model type
-            rag_model_type = self.params.get("rag_model")
-            selected_model_name = None
-            if rag_model_type == "gemini":
-                selected_model_name = self.params.get("selected_gemini_model")
-            elif rag_model_type == "openrouter":
-                # Pass the selected OpenRouter model name via the expected parameter
-                selected_model_name = self.params.get("selected_openrouter_model")
-            # Other RAG models like 'gemma', 'pali', 'None' don't need a specific selected model name here
-
-            # Pass embedding_model_name instead of retrieval_model
-            session = SearchSession(
-                query=self.params["query"],
-                config=config,
-                corpus_dir=self.params.get("corpus_dir"),
-                device=self.params.get("device", "cpu"), # Device for embeddings (cpu, cuda, Gemini, OpenRouter)
-                embedding_model_name=self.params.get("embedding_model_name", "colpali"), # Specific embedding model
-                top_k=self.params.get("top_k", 3),
-                web_search_enabled=self.params.get("web_search", False),
-                personality=self.params.get("personality"),
-                rag_model=rag_model_type, # RAG model type (gemma, gemini, openrouter, etc.)
-                selected_gemini_model=selected_model_name if rag_model_type == "gemini" else None, # Specific generative model if Gemini RAG
-                selected_openrouter_model=selected_model_name if rag_model_type == "openrouter" else None, # Specific generative model if OpenRouter RAG
-                max_depth=self.params.get("max_depth", 1),
-                progress_callback=self._progress_callback_proxy # Pass the callable proxy
-            )
-
-            self.progress_updated.emit("Starting search process...")
-            # Run the asyncio event loop within the thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            final_answer = loop.run_until_complete(session.run_session())
-            loop.close()
-
-            self.progress_updated.emit("Saving final report...")
-            output_path = session.save_report(final_answer)
-            self.progress_updated.emit(f"Report saved: {output_path}")
-            self.search_complete.emit(output_path)
-
-        except ImportError as e:
-             self.error_occurred.emit(f"Import Error: {e}. Check dependencies.")
-        except FileNotFoundError as e:
-             self.error_occurred.emit(f"File Not Found Error: {e}")
-        except ImportError as e:
-             self.error_occurred.emit(f"Import Error: {e}. Check dependencies (e.g., sentence-transformers, transformers).")
-        except FileNotFoundError as e:
-             self.error_occurred.emit(f"File Not Found Error: {e}")
-        except Exception as e:
-            # Log the full traceback for better debugging
-            import traceback
-            traceback.print_exc()
-            self.error_occurred.emit(f"An error occurred during search: {e}")
-        finally:
-            # Clean up proxy if it was created
-            if self._progress_callback_proxy:
-                self._progress_callback_proxy.progress_signal.disconnect()
-                self._progress_callback_proxy = None
-
-
-class GeminiFetcher(QThread):
-    """Fetches available Gemini models in a separate thread."""
-    models_fetched = pyqtSignal(list)
-    fetch_error = pyqtSignal(str)
-    status_update = pyqtSignal(str)
-
-    def run(self):
-        """Executes the *generative* model fetching."""
-        try:
-            self.status_update.emit("Fetching Gemini generative models...")
-            models = list_gemini_models() # Fetch generative models
-            if models is None:
-                self.fetch_error.emit("Could not retrieve Gemini generative models. Check API key/network.")
-            elif not models:
-                self.fetch_error.emit("No suitable Gemini generative models found.")
-            else:
-                self.models_fetched.emit(models)
-        except Exception as e:
-            self.fetch_error.emit(f"Error fetching Gemini generative models: {e}")
-
-class OpenRouterFetcher(QThread):
-    """Fetches available free OpenRouter *generative* models in a separate thread."""
-    models_fetched = pyqtSignal(list)
-    fetch_error = pyqtSignal(str)
-    status_update = pyqtSignal(str)
-
-    def run(self):
-        """Executes the *generative* model fetching."""
-        try:
-            self.status_update.emit("Fetching free OpenRouter generative models...")
-            models = list_openrouter_models() # Fetch generative models
-            if models is None:
-                self.fetch_error.emit("Could not retrieve OpenRouter generative models. Check console/network.")
-            elif not models:
-                self.fetch_error.emit("No free OpenRouter generative models found (based on pricing).")
-            else:
-                self.models_fetched.emit(models)
-        except Exception as e:
-            self.fetch_error.emit(f"Error fetching OpenRouter generative models: {e}")
-
-# --- New Fetcher Threads for Embedding Models ---
-
-class GeminiEmbeddingFetcher(QThread):
-    """Fetches available Gemini *embedding* models."""
-    models_fetched = pyqtSignal(list)
-    fetch_error = pyqtSignal(str)
-    status_update = pyqtSignal(str)
-
-    def run(self):
-        try:
-            self.status_update.emit("Fetching Gemini embedding models...")
-            models = list_gemini_embedding_models() # Call embedding list function
-            if models is None:
-                self.fetch_error.emit("Could not retrieve Gemini embedding models. Check API key/network.")
-            elif not models:
-                self.fetch_error.emit("No suitable Gemini embedding models found.")
-            else:
-                self.models_fetched.emit(models)
-        except Exception as e:
-            self.fetch_error.emit(f"Error fetching Gemini embedding models: {e}")
-
-class OpenRouterEmbeddingFetcher(QThread):
-    """Fetches available free OpenRouter *embedding* models."""
-    models_fetched = pyqtSignal(list)
-    fetch_error = pyqtSignal(str)
-    status_update = pyqtSignal(str)
-
-    def run(self):
-        try:
-            self.status_update.emit("Fetching free OpenRouter embedding models...")
-            models = list_openrouter_embedding_models() # Call embedding list function
-            if models is None:
-                self.fetch_error.emit("Could not retrieve OpenRouter embedding models. Check console/network.")
-            elif not models:
-                self.fetch_error.emit("No free OpenRouter embedding models found (based on pricing/IDs).")
-            else:
-                self.models_fetched.emit(models)
-        except Exception as e:
-            self.fetch_error.emit(f"Error fetching OpenRouter embedding models: {e}")
-
 
 # --- Main Window ---
 
@@ -211,9 +36,9 @@ class MainWindow(QMainWindow):
         # Generative model fetchers
         self.gemini_fetcher = None
         self.openrouter_fetcher = None
-        # Embedding model fetchers
-        self.gemini_embedding_fetcher = None
-        self.openrouter_embedding_fetcher = None
+        # Embedding model fetchers removed as options are gone
+        # self.gemini_embedding_fetcher = None
+        # self.openrouter_embedding_fetcher = None
         self.current_report_path = None
         self.current_results_dir = None
 
@@ -272,7 +97,7 @@ class MainWindow(QMainWindow):
 
         self.device_combo = QComboBox()
         # Add new API device options
-        self.device_combo.addItems(["cpu", "cuda", "Gemini", "OpenRouter"])
+        self.device_combo.addItems(["cpu", "cuda"])
         embedding_layout.addRow("Embedding Device:", self.device_combo)
 
         # Renamed combo box for clarity
@@ -282,13 +107,13 @@ class MainWindow(QMainWindow):
         self.embedding_model_label = QLabel("Embedding Model:") # Label for the combo
         embedding_layout.addRow(self.embedding_model_label, self.embedding_model_combo)
 
-        # Add fetch buttons for embedding models (initially hidden)
-        self.gemini_embedding_fetch_button = QPushButton("Fetch Gemini Embed Models")
-        self.openrouter_embedding_fetch_button = QPushButton("Fetch OpenRouter Embed Models")
-        self.gemini_embedding_fetch_button.setVisible(False)
-        self.openrouter_embedding_fetch_button.setVisible(False)
-        embedding_layout.addRow(self.gemini_embedding_fetch_button)
-        embedding_layout.addRow(self.openrouter_embedding_fetch_button)
+        # Removed fetch buttons for Gemini/OpenRouter embedding models
+        # self.gemini_embedding_fetch_button = QPushButton("Fetch Gemini Embed Models")
+        # self.openrouter_embedding_fetch_button = QPushButton("Fetch OpenRouter Embed Models")
+        # self.gemini_embedding_fetch_button.setVisible(False)
+        # self.openrouter_embedding_fetch_button.setVisible(False)
+        # embedding_layout.addRow(self.gemini_embedding_fetch_button)
+        # embedding_layout.addRow(self.openrouter_embedding_fetch_button)
 
         embedding_group.setLayout(embedding_layout)
         config_layout.addRow(embedding_group) # Add embedding group to main config layout
@@ -395,9 +220,9 @@ class MainWindow(QMainWindow):
         # Connect generative model fetch buttons
         self.gemini_fetch_button.clicked.connect(self.fetch_gemini_models)
         self.openrouter_fetch_button.clicked.connect(self.fetch_openrouter_models)
-        # Connect embedding model fetch buttons
-        self.gemini_embedding_fetch_button.clicked.connect(self.fetch_gemini_embedding_models)
-        self.openrouter_embedding_fetch_button.clicked.connect(self.fetch_openrouter_embedding_models)
+        # Removed connections for embedding model fetch buttons
+        # self.gemini_embedding_fetch_button.clicked.connect(self.fetch_gemini_embedding_models)
+        # self.openrouter_embedding_fetch_button.clicked.connect(self.fetch_openrouter_embedding_models)
         # Connect result buttons
         self.open_report_button.clicked.connect(self.open_report)
         self.open_folder_button.clicked.connect(self.open_results_folder)
@@ -410,26 +235,24 @@ class MainWindow(QMainWindow):
         self.embedding_model_combo.clear() # Clear previous model options
         self.embedding_model_combo.setEnabled(True) # Enable by default
 
-        # Show/hide fetch buttons
-        self.gemini_embedding_fetch_button.setVisible(device_name == "Gemini")
-        self.openrouter_embedding_fetch_button.setVisible(device_name == "OpenRouter")
-
-        # Reset fetch button states
-        self.gemini_embedding_fetch_button.setEnabled(True)
-        self.openrouter_embedding_fetch_button.setEnabled(True)
+        # Removed logic for showing/hiding/resetting Gemini/OpenRouter embedding fetch buttons
+        # self.gemini_embedding_fetch_button.setVisible(device_name == "Gemini")
+        # self.openrouter_embedding_fetch_button.setVisible(device_name == "OpenRouter")
+        # self.gemini_embedding_fetch_button.setEnabled(True)
+        # self.openrouter_embedding_fetch_button.setEnabled(True)
 
         if device_name == "cpu" or device_name == "cuda":
             self.embedding_model_combo.addItems(["colpali", "all-minilm"])
             self.embedding_model_label.setText("Embedding Model:")
-        elif device_name == "Gemini":
-            self.embedding_model_label.setText("Select Gemini Embed Model:")
-            self.embedding_model_combo.setEnabled(False) # Disable until fetched
-            self.fetch_gemini_embedding_models() # Auto-fetch on selection
-        elif device_name == "OpenRouter":
-            self.embedding_model_label.setText("Select OpenRouter Embed Model:")
-            self.embedding_model_combo.setEnabled(False) # Disable until fetched
-            self.fetch_openrouter_embedding_models() # Auto-fetch on selection
+        # Removed elif blocks for "Gemini" and "OpenRouter" as they are no longer options
+        # elif device_name == "Gemini":
+        #     ...
+        # elif device_name == "OpenRouter":
+        #     ...
         else:
+            # This case should ideally not be reached if only cpu/cuda are options
+            self.log_status(f"Warning: Unexpected embedding device selected: {device_name}")
+            self.embedding_model_combo.clear()
             self.embedding_model_combo.setEnabled(False)
             self.embedding_model_label.setText("Embedding Model:")
 
@@ -534,68 +357,7 @@ class MainWindow(QMainWindow):
         self.openrouter_model_combo.clear()
         self.openrouter_model_combo.setEnabled(False)
         self.openrouter_fetch_button.setEnabled(True) # Re-enable on error
-
-    # --- Embedding Model Fetching Slots ---
-
-    def fetch_gemini_embedding_models(self):
-        """Start the GeminiEmbeddingFetcher thread."""
-        if self.gemini_embedding_fetcher and self.gemini_embedding_fetcher.isRunning():
-            self.log_status("Already fetching Gemini embedding models...")
-            return
-        self.log_status("Attempting to fetch Gemini embedding models (requires GEMINI_API_KEY)...")
-        self.gemini_embedding_fetch_button.setEnabled(False)
-        self.gemini_embedding_fetcher = GeminiEmbeddingFetcher(self)
-        self.gemini_embedding_fetcher.status_update.connect(self.log_status)
-        self.gemini_embedding_fetcher.models_fetched.connect(self.on_gemini_embedding_models_fetched)
-        self.gemini_embedding_fetcher.fetch_error.connect(self.on_gemini_embedding_fetch_error)
-        self.gemini_embedding_fetcher.finished.connect(lambda: self.gemini_embedding_fetch_button.setEnabled(self.embedding_model_combo.count() == 0))
-        self.gemini_embedding_fetcher.start()
-
-    def on_gemini_embedding_models_fetched(self, models):
-        """Populate the *embedding* model combo box for Gemini."""
-        self.log_status(f"Successfully fetched {len(models)} Gemini embedding models.")
-        self.embedding_model_combo.clear()
-        self.embedding_model_combo.addItems(models)
-        self.embedding_model_combo.setEnabled(True)
-        self.gemini_embedding_fetch_button.setEnabled(False)
-
-    def on_gemini_embedding_fetch_error(self, error_message):
-        """Handle error fetching Gemini *embedding* models."""
-        self.log_status(f"Gemini Embedding Fetch Error: {error_message}")
-        self.embedding_model_combo.clear()
-        self.embedding_model_combo.setEnabled(False)
-        self.gemini_embedding_fetch_button.setEnabled(True)
-
-    def fetch_openrouter_embedding_models(self):
-        """Start the OpenRouterEmbeddingFetcher thread."""
-        if self.openrouter_embedding_fetcher and self.openrouter_embedding_fetcher.isRunning():
-            self.log_status("Already fetching OpenRouter embedding models...")
-            return
-        self.log_status("Attempting to fetch free OpenRouter embedding models...")
-        self.openrouter_embedding_fetch_button.setEnabled(False)
-        self.openrouter_embedding_fetcher = OpenRouterEmbeddingFetcher(self)
-        self.openrouter_embedding_fetcher.status_update.connect(self.log_status)
-        self.openrouter_embedding_fetcher.models_fetched.connect(self.on_openrouter_embedding_models_fetched)
-        self.openrouter_embedding_fetcher.fetch_error.connect(self.on_openrouter_embedding_fetch_error)
-        self.openrouter_embedding_fetcher.finished.connect(lambda: self.openrouter_embedding_fetch_button.setEnabled(self.embedding_model_combo.count() == 0))
-        self.openrouter_embedding_fetcher.start()
-
-    def on_openrouter_embedding_models_fetched(self, models):
-        """Populate the *embedding* model combo box for OpenRouter."""
-        self.log_status(f"Successfully fetched {len(models)} free OpenRouter embedding models.")
-        self.embedding_model_combo.clear()
-        self.embedding_model_combo.addItems(models)
-        self.embedding_model_combo.setEnabled(True)
-        self.openrouter_embedding_fetch_button.setEnabled(False)
-
-    def on_openrouter_embedding_fetch_error(self, error_message):
-        """Handle error fetching OpenRouter *embedding* models."""
-        self.log_status(f"OpenRouter Embedding Fetch Error: {error_message}")
-        self.embedding_model_combo.clear()
-        self.embedding_model_combo.setEnabled(False)
-        self.openrouter_embedding_fetch_button.setEnabled(True)
-
-
+    # Removed slots related to fetching Gemini/OpenRouter embedding models
     # --- Search Execution ---
 
     def start_search(self):
@@ -747,20 +509,11 @@ class MainWindow(QMainWindow):
         if self.openrouter_fetcher and self.openrouter_fetcher.isRunning():
              self.openrouter_fetcher.terminate()
              self.openrouter_fetcher.wait()
-        # Stop embedding fetchers
-        if self.gemini_embedding_fetcher and self.gemini_embedding_fetcher.isRunning():
-             self.gemini_embedding_fetcher.terminate()
-             self.gemini_embedding_fetcher.wait()
-        if self.openrouter_embedding_fetcher and self.openrouter_embedding_fetcher.isRunning():
-             self.openrouter_embedding_fetcher.terminate()
-             self.openrouter_embedding_fetcher.wait()
+        # Removed termination logic for embedding fetchers
+        # if self.gemini_embedding_fetcher and self.gemini_embedding_fetcher.isRunning():
+        #      self.gemini_embedding_fetcher.terminate()
+        #      self.gemini_embedding_fetcher.wait()
+        # if self.openrouter_embedding_fetcher and self.openrouter_embedding_fetcher.isRunning():
+        #      self.openrouter_embedding_fetcher.terminate()
+        #      self.openrouter_embedding_fetcher.wait()
         event.accept()
-
-
-# --- Application Entry Point ---
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    main_window = MainWindow()
-    main_window.show()
-    sys.exit(app.exec())

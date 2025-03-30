@@ -172,4 +172,4 @@ cython_debug/
 config.json
 
 results/
-config.ini
+config.yaml

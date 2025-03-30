@@ -9,8 +9,9 @@ import fitz  # PyMuPDF
 # PIL is only needed for OCR, which is optional
 # from PIL import Image
 
-# Import the new embedding functions
-from llm_utils import call_gemini_embedding, call_openrouter_embedding
+# Removed API embedding function imports
+# from llm_providers.gemini import call_gemini_embedding
+# from llm_providers.openrouter import call_openrouter_embedding
 
 ############################
 # Load & Configure Retrieval
@@ -30,21 +31,12 @@ def load_retrieval_model(embedding_model_name: str, device: str):
         tuple: (model, processor, model_type)
                - model: Loaded model object (local) or None (API).
                - processor: Loaded processor object (local) or None (API).
-               - model_type: String identifier ('colpali', 'all-minilm', 'gemini-api', 'openrouter-api').
+                - model_type: String identifier ('colpali', 'all-minilm').
     """
-    # Handle API cases first
-    if device == "Gemini":
-        print(f"[INFO] Preparing for Gemini API embeddings with model: {embedding_model_name}")
-        # No local model/processor needed for API calls
-        return None, None, "gemini-api"
-    elif device == "OpenRouter":
-        # No local model/processor needed, just return type identifier
-        print(f"[INFO] Preparing for OpenRouter API embeddings with model: {embedding_model_name}")
-        # No local model/processor needed for API calls
-        return None, None, "openrouter-api"
+    # Removed API cases ("Gemini", "OpenRouter")
 
     # Handle local model cases (device is 'cpu' or 'cuda')
-    elif embedding_model_name == "colpali":
+    if embedding_model_name == "colpali":
         try:
             from transformers import ColPaliForRetrieval, ColPaliProcessor
         except ImportError:
@@ -73,18 +65,18 @@ def load_retrieval_model(embedding_model_name: str, device: str):
         raise ValueError(f"Unsupported local retrieval model choice '{embedding_model_name}' for device '{device}'")
 
 
-# Added embedding_model_name parameter
+# Removed gemini_api_key, openrouter_api_key parameters
 def embed_text(text: str, model, processor, model_type: str, embedding_model_name: str, device: str) -> torch.Tensor | None:
     """
-    Generates embeddings for the given text using either a local model or an API.
+    Generates embeddings for the given text using a local model.
 
     Args:
         text (str): The text to embed.
-        model: The loaded local model (or None for API).
-        processor: The loaded local processor (or None for API).
-        model_type (str): Identifier ('colpali', 'all-minilm', 'gemini-api', 'openrouter-api').
-        embedding_model_name (str): The specific name of the model to use (especially for APIs).
-        device (str): The target device ('cpu', 'cuda', 'Gemini', 'OpenRouter').
+        model: The loaded local model.
+        processor: The loaded local processor (if applicable).
+        model_type (str): Identifier ('colpali', 'all-minilm').
+        embedding_model_name (str): The specific name of the local model.
+        device (str): The target device ('cpu', 'cuda').
 
     Returns:
         torch.Tensor | None: The embedding tensor, or None if embedding failed.
@@ -109,22 +101,9 @@ def embed_text(text: str, model, processor, model_type: str, embedding_model_nam
             # SentenceTransformer returns numpy array by default, convert_to_tensor=True gives torch tensor
             embedding = model.encode(text, convert_to_tensor=True)
             return embedding.cpu() # Return on CPU
-        elif model_type == "gemini-api":
-            embedding_list = call_gemini_embedding(text, model_name=embedding_model_name)
-            if embedding_list:
-                return torch.tensor(embedding_list, dtype=torch.float32)
-            else:
-                print(f"[WARN] Failed to get Gemini embedding for model {embedding_model_name}.")
-                return None
-        elif model_type == "openrouter-api":
-            embedding_list = call_openrouter_embedding(text, model_name=embedding_model_name)
-            if embedding_list:
-                return torch.tensor(embedding_list, dtype=torch.float32)
-            else:
-                print(f"[WARN] Failed to get OpenRouter embedding for model {embedding_model_name}.")
-                return None
+        # Removed 'gemini-api' and 'openrouter-api' cases
         else:
-            raise ValueError(f"Unsupported model_type for embedding: {model_type}")
+            raise ValueError(f"Unsupported local model_type for embedding: {model_type}")
     except Exception as e:
         # Log the error and the text snippet that caused it for debugging
         snippet = text[:100].replace('\n', ' ') + "..."
@@ -133,6 +112,7 @@ def embed_text(text: str, model, processor, model_type: str, embedding_model_nam
         print(f"[ERROR] Failed to embed text (snippet: '{snippet}...') using {model_type}/{embedding_model_name}: {error_message}")
         # Optionally re-raise or return None based on desired error handling
         return None
+
 
 ##################
 # Scoring & Search
@@ -156,10 +136,13 @@ def late_interaction_score(query_emb, doc_emb):
     # Clamp values to avoid potential floating point issues outside [-1, 1]
     return float(torch.clamp(similarity, -1.0, 1.0))
 
-# Added embedding_model_name parameter
+# Removed gemini_api_key, openrouter_api_key parameters
 def retrieve(query: str, corpus: list, model, processor, top_k: int, model_type: str, embedding_model_name: str, device: str) -> list:
     """Retrieves the top_k most relevant documents from the corpus for the query."""
-    query_embedding = embed_text(query, model, processor, model_type, embedding_model_name, device)
+    # Removed API keys from embed_text call
+    query_embedding = embed_text(
+        query, model, processor, model_type, embedding_model_name, device
+    )
 
     if query_embedding is None:
         print("[ERROR] Could not generate query embedding. Retrieval failed.")
@@ -198,10 +181,10 @@ def retrieve(query: str, corpus: list, model, processor, top_k: int, model_type:
 ##################################
 # Building a Corpus from a Folder
 ##################################
-# Added embedding_model_name parameter
+# Removed gemini_api_key, openrouter_api_key parameters
 def load_corpus_from_dir(corpus_dir: str, model, processor, device: str, model_type: str, embedding_model_name: str, progress_callback=None) -> list:
     """
-    Scan 'corpus_dir' for txt, pdf files, embed their text using the specified model/API,
+    Scan 'corpus_dir' for txt, pdf files, embed their text using the specified local model,
     and return a list of { 'embedding':..., 'metadata':... } entries.
     Calls progress_callback with status updates if provided.
     """
@@ -247,8 +230,10 @@ def load_corpus_from_dir(corpus_dir: str, model, processor, device: str, model_t
             continue
 
         # --- Embedding Step ---
-        # Use the unified embed_text function
-        emb = embed_text(text, model, processor, model_type, embedding_model_name, device)
+        # Use the unified embed_text function (API keys removed)
+        emb = embed_text(
+            text, model, processor, model_type, embedding_model_name, device
+        )
 
         if emb is None:
             print(f"[WARN] Failed to generate embedding for {filename}. Skipping.")
@@ -302,8 +287,12 @@ class KnowledgeBase:
             device=self.device
         )
         self._progress(f"KnowledgeBase initialized with model_type='{self.model_type}'")
+        # Removed API key storage
+        # self.gemini_api_key = os.getenv("GEMINI_API_KEY")
+        # self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
 
 
+    # Removed API key parameters
     def build_from_directory(self, corpus_dir: str):
         """Loads and embeds documents from a directory."""
         if not corpus_dir:
@@ -320,6 +309,7 @@ class KnowledgeBase:
             model_type=self.model_type,
             embedding_model_name=self.embedding_model_name,
             progress_callback=self._progress
+            # Removed API keys
         )
         self._progress(f"Knowledge base built with {len(self.corpus)} documents.")
 
@@ -350,6 +340,7 @@ class KnowledgeBase:
         self._progress(f"Added {count} pre-computed document entries.")
 
 
+    # Removed API key parameters
     def search(self, query: str, top_k: int = 3) -> list:
         """Searches the corpus for the most relevant documents."""
         self._progress(f"Searching knowledge base for query: '{query[:50]}...'")
@@ -366,6 +357,7 @@ class KnowledgeBase:
             model_type=self.model_type,
             embedding_model_name=self.embedding_model_name, # Pass the name
             device=self.device
+            # Removed API keys
         )
         self._progress(f"Retrieval found {len(results)} results.")
         return results
