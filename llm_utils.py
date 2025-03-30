@@ -18,7 +18,7 @@ import time # For sleep in retry
 def handle_rate_limit(details):
     """Custom handler for backoff to specifically wait on 429 errors."""
     exc_type, exc_value, _ = details['exception']
-    wait_time = 15 # Seconds to wait for 429 errors
+    wait_time = 30 # Seconds to wait for 429 errors (Increased from 15)
 
     is_rate_limit_error = False
     if isinstance(exc_value, google.api_core.exceptions.ResourceExhausted):
@@ -220,7 +220,7 @@ def call_gemma(prompt, model="gemma2:2b", personality=None):
 # Add backoff decorator for OpenRouter chat completions
 @backoff.on_exception(backoff.expo,
                       HTTPError,
-                      max_tries=5,
+                      max_tries=8, # Increased from 5
                       on_backoff=handle_rate_limit) # Use custom handler for 429s
 @backoff.on_exception(backoff.expo,
                       requests.exceptions.RequestException,
@@ -302,7 +302,7 @@ def call_openrouter(prompt, model="openai/gpt-3.5-turbo", personality=None):
 # Updated retry logic for Gemini: specific handling for ResourceExhausted
 @backoff.on_exception(backoff.expo,
                       google.api_core.exceptions.ResourceExhausted,
-                      max_tries=5,
+                      max_tries=8, # Increased from 5
                       on_backoff=handle_rate_limit) # Use custom handler
 @backoff.on_exception(backoff.expo,
                       (google.api_core.exceptions.DeadlineExceeded,
@@ -340,7 +340,7 @@ def call_gemini(prompt, model_name):
 # Updated retry logic for Gemini embeddings
 @backoff.on_exception(backoff.expo,
                       google.api_core.exceptions.ResourceExhausted,
-                      max_tries=5,
+                      max_tries=8, # Increased from 5
                       on_backoff=handle_rate_limit) # Use custom handler
 @backoff.on_exception(backoff.expo,
                       (google.api_core.exceptions.DeadlineExceeded,
@@ -376,7 +376,7 @@ def call_gemini_embedding(text: str, model_name: str = "models/embedding-001") -
 # Updated retry logic for OpenRouter embeddings
 @backoff.on_exception(backoff.expo,
                       HTTPError,
-                      max_tries=5,
+                      max_tries=8, # Increased from 5
                       on_backoff=handle_rate_limit) # Use custom handler for 429s
 @backoff.on_exception(backoff.expo,
                       requests.exceptions.RequestException,
