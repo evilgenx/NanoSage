@@ -25,8 +25,8 @@ You can find an example report in the following link:
 
 ### 1. Install Dependencies
 
-1. Ensure **Python 3.8+** is installed.  
-2. Install required packages:
+1. Ensure **Python 3.8+** is installed.
+2. Install required packages (including `PyQt6` for the GUI and other necessary libraries):
 
 ```bash
 pip install -r requirements.txt
@@ -48,16 +48,16 @@ pip install --upgrade pyOpenSSL cryptography
 
 ---
 
-### 1.5. (Optional) Launch the GUI
+### 1.5. Launch the GUI (Recommended)
 
-NanoSage also includes a graphical user interface (GUI) for easier interaction.
+NanoSage includes a graphical user interface (GUI) built with PyQt6 for easier interaction.
 
-1.  **Install GUI Dependencies**: Ensure you have Tkinter installed (usually included with Python). If not, install it for your system (e.g., `sudo apt-get install python3-tk` on Debian/Ubuntu).
+1.  **Dependencies**: The required `PyQt6` library is included in `requirements.txt` and installed in the previous step.
 2.  **Run the GUI**:
     ```bash
-    python gui.py
+    python main.py --gui
     ```
-    This will open a window where you can enter your query, select options (like web search, RAG model), and start the research process without using the command line directly. Results will still be saved in the `results/` directory.
+    This will open the main application window where you can enter your query, configure settings (like web search, embedding model, RAG provider), and start the research process. Results are saved in the `results/` directory.
 
 ---
 
@@ -80,25 +80,37 @@ ollama pull gemma2:2b
 
 ---
 
-### 3. Run a Simple Search Query
+### 3. Run a Simple Search Query (CLI Mode)
 
-A sample command to run your **search session**:
+If you prefer the command line, here's a sample command:
 
 ```bash
-python main.py --query "Create a structure bouldering gym workout to push my climbing from v4 to v6"  \
+python main.py --query "Create a structured bouldering gym workout to push my climbing from v4 to v6" \
                --web_search \
                --max_depth 2 \
                --device cpu \
                --top_k 10 \
-               --retrieval_model colpali
+               --embedding_model colpali \
+               --rag_model gemma
 ```
 
-**Parameters**:
-- `--query`: Main search query (natural language).
-- `--web_search`: Enables web-based retrieval.
-- `--max_depth`: Recursion depth for subqueries (2 levels).
-- `--device cpu`: Uses CPU (swap with `cuda` for GPU).
-- `--retrieval_model colpali`: Uses **ColPali** for retrieval (try `all-minilm` for lighter model).
+**Common Parameters**:
+- `--query`: Main search query (required in CLI mode).
+- `--gui`: Launches the graphical user interface instead of running in CLI.
+- `--config`: Path to the configuration file (default: `config.yaml`).
+- `--corpus_dir`: Path to a directory containing local documents for search.
+- `--web_search`: Enables web-based retrieval (use `--no-web_search` to disable if default is true in config).
+- `--max_depth`: Recursion depth for subqueries (default: 1).
+- `--device`: Device for embedding model (`cpu` or `cuda`).
+- `--top_k`: Number of local documents to retrieve.
+- `--embedding_model`: Specifies the embedding model (e.g., `colpali`, `all-minilm`, `models/embedding-001`, `openai/text-embedding-ada-002`). Default is defined in `config.yaml`.
+- `--rag_model`: Selects the LLM provider for summarization and report generation (`gemma`, `pali`, `gemini`, `openrouter`). Default in `config.yaml`.
+- `--gemma_model_id`: Specific Ollama model ID (e.g., `gemma2:2b`, `llama3:8b`) if using `gemma` or `pali`.
+- `--gemini_model_id`: Specific Gemini model ID (e.g., `models/gemini-1.5-flash-latest`) if using `gemini`.
+- `--openrouter_model_id`: Specific OpenRouter model ID (e.g., `openai/gpt-3.5-turbo`, `google/gemini-flash-1.5`) if using `openrouter`.
+- `--personality`: Optional personality prompt for the RAG LLM (e.g., "scientific", "concise").
+
+*Settings Hierarchy: Command-line arguments override `config.yaml` settings, which override internal defaults.*
 
 ---
 
@@ -129,38 +141,73 @@ If you have local PDFs, text files, or images:
 ```bash
 python main.py --query "AI in finance" \
                --corpus_dir "my_local_data/" \
+               --embedding_model all-minilm \
                --top_k 5 \
                --device cpu
 ```
+*This searches local documents in `my_local_data/` using the `all-minilm` embedding model.*
 
 Now the system searches **both** local docs and web data (if `--web_search` is enabled).
 
-#### 🔄 RAG with Gemma 2B
+#### 🔄 RAG with Different LLM Providers
+
+You can choose the LLM provider for generating summaries and the final report using `--rag_model`.
+
+**Using Gemma (via Ollama):**
 
 ```bash
 python main.py --query "Climate change impact on economy" \
                --rag_model gemma \
+               --gemma_model_id llama3:8b \
                --personality "scientific"
 ```
+*This uses the `llama3:8b` model (via Ollama) for RAG. If `--gemma_model_id` is omitted, it uses the default specified in `config.yaml` or the internal default (`gemma2:2b`).*
 
-This uses **Gemma 2B** to generate LLM-based summaries and the final report.
-
-#### ✨ Using Gemini API for RAG
-
-You can also leverage Google's Gemini models for the final report generation.
+**Using Gemini API:**
 
 1.  **Get an API Key**: Obtain a Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
-2.  **Set Environment Variable**: Set the `GEMINI_API_KEY` environment variable:
-    ```bash
-    export GEMINI_API_KEY='YOUR_API_KEY'
-    ```
-    *(On Windows, use `set GEMINI_API_KEY=YOUR_API_KEY` or set it via system properties.)*
-3.  **Run with Gemini**: Use the `--rag_model gemini` flag:
+2.  **Provide the Key**: You can provide the key in two ways:
+    *   **Environment Variable**: Set the `GEMINI_API_KEY` environment variable.
+        ```bash
+        export GEMINI_API_KEY='YOUR_API_KEY' 
+        # Windows: set GEMINI_API_KEY=YOUR_API_KEY
+        ```
+    *   **Configuration File**: Add the key to your `config.yaml` under `api_keys`:
+        ```yaml
+        api_keys:
+          gemini_api_key: YOUR_API_KEY_HERE 
+        ```
+3.  **Run with Gemini**: Use the `--rag_model gemini` flag.
     ```bash
     python main.py --query "Latest advancements in renewable energy" \
                    --rag_model gemini \
+                   --gemini_model_id models/gemini-1.5-pro-latest \
                    --web_search
     ```
+    *If `--gemini_model_id` is omitted, it uses the default from `config.yaml` or the internal default. If no model is specified anywhere and the API key is valid, the application will list available models and prompt you to choose one interactively.*
+
+**Using OpenRouter API:**
+
+1.  **Get an API Key**: Obtain an OpenRouter API key from [OpenRouter.ai](https://openrouter.ai/).
+2.  **Provide the Key**: Similar to Gemini, provide the key via:
+    *   **Environment Variable**: Set the `OPENROUTER_API_KEY` environment variable.
+        ```bash
+        export OPENROUTER_API_KEY='YOUR_API_KEY'
+        # Windows: set OPENROUTER_API_KEY=YOUR_API_KEY
+        ```
+    *   **Configuration File**: Add the key to `config.yaml` under `api_keys`:
+        ```yaml
+        api_keys:
+          openrouter_api_key: YOUR_API_KEY_HERE 
+        ```
+3.  **Run with OpenRouter**: Use the `--rag_model openrouter` flag.
+    ```bash
+    python main.py --query "Future of AI in education" \
+                   --rag_model openrouter \
+                   --openrouter_model_id google/gemini-flash-1.5 \
+                   --web_search
+    ```
+    *Specify the desired model using `--openrouter_model_id`. If omitted, it uses the default from `config.yaml` or the internal default (`openai/gpt-3.5-turbo`).*
 
 ---
 
@@ -175,9 +222,10 @@ You can also leverage Google's Gemini models for the final report generation.
 
 ### 7. Next Steps
 
-- **Try different retrieval models** (`--retrieval_model all-minilm`).
+- **Try different embedding models** (`--embedding_model all-minilm`).
+- **Experiment with different RAG providers and models** (`--rag_model`, `--gemma_model_id`, etc.).
 - **Tweak recursion** (`--max_depth`).
-- **Tune** `config.yaml` for web search limits, `min_relevance`, or Monte Carlo search.
+- **Tune** `config.yaml` for web search limits, `min_relevance`, API keys, or default models.
 
 ---
 
@@ -188,31 +236,41 @@ You can also leverage Google's Gemini models for the final report generation.
 - **User Query**: E.g. `"Quantum computing in healthcare"`.
 - **CLI Flags** (in `main.py`):
   ```
+  --query
+  --gui
+  --config
   --corpus_dir
   --device
-  --retrieval_model
+  --embedding_model # Changed from retrieval_model
   --top_k
-  --web_search
+  --web_search / --no-web_search
   --personality
-  --rag_model
+  --rag_model       # gemma, pali, gemini, openrouter
+  --gemma_model_id
+  --gemini_model_id
+  --openrouter_model_id
   --max_depth
   ```
 - **YAML Config** (e.g. `config.yaml`):
-  - `"results_base_dir"`, `"max_query_length"`, `"web_search_limit"`, `"min_relevance"`, etc.
+  - Sections: `general`, `retrieval`, `llm`, `api_keys`.
+  - Defines defaults for most CLI flags.
+  - Allows setting API keys directly (`gemini_api_key`, `openrouter_api_key`).
 
 ### 2. Configuration & Session Setup
 
-1. **Configuration**:  
-   `load_config(config_path)` to read YAML settings.
-   - **`min_relevance`**: cutoff for subquery branching.
+1. **Configuration Loading**:
+   - `load_config(config_path)` reads YAML.
+   - Settings are resolved in order: CLI Args > Config File > Internal Defaults.
+   - API keys are resolved: Config File > Environment Variable > None.
 
-2. **Session Initialization**:  
-   `SearchSession.__init__()` sets:
-   - A unique `query_id` & `base_result_dir`.
-   - Enhanced query via `chain_of_thought_query_enhancement()`.
-   - Retrieval model loaded with `load_retrieval_model()`.
-   - Query embedding for relevance checks (`embed_text()`).
-   - Local files (if any) loaded & added to `KnowledgeBase`.
+2. **Session Initialization**:
+   `SearchSession.__init__()` uses the *resolved* settings:
+   - Sets up `query_id`, `base_result_dir`.
+   - Enhances query via `chain_of_thought_query_enhancement()`.
+   - Loads the specified embedding model (`load_embedding_model()`). # Updated function name assumed
+   - Embeds the query for relevance checks (`embed_text()`).
+   - Loads local files (if `corpus_dir` provided) into `KnowledgeBase`.
+   - Initializes the selected RAG provider (Ollama, Gemini, OpenRouter).
 
 ### 3. Recursive Web Search & TOC Tracking
 
@@ -241,17 +299,10 @@ You can also leverage Google's Gemini models for the final report generation.
 
 ### 5. Final RAG Prompt & Report Generation
 
-1. **_build_final_answer(...)**:
-   - Constructs a large prompt including:
-     - The user query,
-     - Table of Contents (with node summaries),
-     - Summaries of web & local results,
-     - Reference URLs.
-   - Asks for a “multi-section advanced markdown report.”
-2. **rag_final_answer(...)**:
-   - Calls `call_gemma()` (or other LLM) to produce the final text.
-3. **aggregate_results(...)**:
-   - Saves the final answer plus search data into a `.md` file in `results/<query_id>/`.
+1. **Build Prompt**: `_build_final_answer(...)` constructs a prompt with:
+   - User query, TOC, summaries, references.
+2. **Call LLM**: `rag_final_answer(...)` calls the selected RAG provider (`call_ollama()`, `call_gemini()`, `call_openrouter()`) with the prompt and specified model ID. # Updated function names assumed
+3. **Save Report**: `aggregate_results(...)` saves the generated report to `results/<query_id>/`.
 
 ### 6. Balancing Exploration vs. Exploitation
 
@@ -276,7 +327,7 @@ main.py:
          └── Create SearchSession(...)
               │
               ├── chain_of_thought_query_enhancement()
-              ├── load_retrieval_model()
+              ├── load_embedding_model() # Updated
               ├── embed_text() for reference
               ├── load_corpus_from_dir() → KnowledgeBase.add_documents()
               └── run_session():
@@ -295,7 +346,7 @@ main.py:
               ├── KnowledgeBase.search(enhanced_query, top_k)
               ├── Summarize results
               ├── _build_final_answer() → prompt
-              ├── rag_final_answer() → call_gemma()
+              ├── rag_final_answer() → call_ollama()/call_gemini()/call_openrouter() # Updated
               └── aggregate_results() → saves Markdown
 ```
 
