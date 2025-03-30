@@ -6,6 +6,7 @@ numpy
 pyyaml
 
 # Web and Parsing
+requests # Added for OpenRouter API calls
 aiohttp
 duckduckgo_search
 beautifulsoup4
@@ -17,4 +18,5 @@ PyQt6    # For the GUI
 # Optional LLM Integration
 ollama
 google-generativeai
+backoff # Added for retry logic in llm_utils
 accelerate>=0.26.0 # Required for transformers with device_map

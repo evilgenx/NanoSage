@@ -7,7 +7,8 @@ import os
 import sys # Import sys for exiting
 
 # Import SearchSession and related functions
-from search_session import SearchSession, list_gemini_models
+from search_session import SearchSession
+from llm_utils import list_gemini_models # Import from the correct file
 
 # Conditional GUI imports
 GUI_ENABLED = True
@@ -35,7 +36,8 @@ def main():
     parser.add_argument("--top_k", type=int, default=3, help="Number of local docs to retrieve")
     parser.add_argument("--web_search", action="store_true", default=False, help="Enable web search")
     parser.add_argument("--personality", type=str, default=None, help="Optional personality for Gemma (e.g. cheerful)")
-    parser.add_argument("--rag_model", type=str, choices=["gemma", "pali", "gemini"], default="gemma", help="Which model to use for final RAG steps (gemma, pali, gemini)")
+    parser.add_argument("--rag_model", type=str, choices=["gemma", "pali", "gemini", "openrouter"], default="gemma", help="Which model to use for final RAG steps (gemma, pali, gemini, openrouter)") # Added openrouter
+    parser.add_argument("--openrouter_model", type=str, default=None, help="Specific model ID to use when rag_model is 'openrouter'") # Added openrouter model selection
     parser.add_argument("--max_depth", type=int, default=1, help="Depth limit for subquery expansions")
     parser.add_argument("--gui", action="store_true", help="Launch the graphical user interface") # Add GUI flag
     args = parser.parse_args()
@@ -98,6 +100,15 @@ def main():
                      print("\n[ERROR] Input cancelled. Exiting.")
                      sys.exit(1)
 
+    # --- OpenRouter Model Check ---
+    selected_openrouter_model = None
+    if args.rag_model == "openrouter":
+        if not args.openrouter_model:
+            parser.error("--openrouter_model is required when --rag_model is 'openrouter'")
+        else:
+            selected_openrouter_model = args.openrouter_model
+            print(f"[INFO] Using OpenRouter model: {selected_openrouter_model}")
+            # Optional: Add validation here to check if the model exists via llm_utils.list_openrouter_models() if desired
 
     session = SearchSession(
         query=args.query,
@@ -110,6 +121,7 @@ def main():
         personality=args.personality,
         rag_model=args.rag_model,
         selected_gemini_model=selected_gemini_model, # Pass the selected model
+        selected_openrouter_model=selected_openrouter_model, # Pass the selected OpenRouter model
         max_depth=args.max_depth
     )
 

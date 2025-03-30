@@ -22,7 +22,8 @@ def sanitize_path(path):
     else:
         return os.sep.join(sanitized_parts)
 
-async def download_page(session, url, headers, timeout, file_path):
+# Added progress_callback parameter
+async def download_page(session, url, headers, timeout, file_path, progress_callback):
     try:
         async with session.get(url, headers=headers, timeout=timeout) as response:
             response.raise_for_status()
@@ -42,10 +43,15 @@ async def download_page(session, url, headers, timeout, file_path):
             print(f"[INFO] Saved '{url}' -> '{file_path}'")
             return {'url': url, 'file_path': file_path, 'content_type': content_type}
     except Exception as e:
-        print(f"[WARN] Couldn't fetch '{url}': {e}")
+        error_message = f"Couldn't fetch '{url}': {e}"
+        print(f"[WARN] {error_message}")
+        # Call the progress callback with the warning
+        if progress_callback:
+            progress_callback(f"[WARN] {error_message}")
         return None
 
-async def download_webpages_ddg(keyword, limit=5, output_dir='downloaded_webpages'):
+# Added progress_callback parameter
+async def download_webpages_ddg(keyword, limit=5, output_dir='downloaded_webpages', progress_callback=None):
     """
     Perform a DuckDuckGo text search and download pages asynchronously.
     Returns a list of dicts with 'url', 'file_path', and optionally 'content_type'.
@@ -82,7 +88,8 @@ async def download_webpages_ddg(keyword, limit=5, output_dir='downloaded_webpage
             short_keyword = sanitize_filename(keyword)[:50]  # up to 50 chars
             filename = f"{short_keyword}_{idx}{ext}"
             file_path = os.path.join(output_dir, filename)
-            tasks.append(download_page(session, url, headers, timeout, file_path))
+            # Pass progress_callback to download_page
+            tasks.append(download_page(session, url, headers, timeout, file_path, progress_callback))
         pages = await asyncio.gather(*tasks)
         for page in pages:
             if page:
