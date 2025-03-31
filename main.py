@@ -41,6 +41,11 @@ def main():
     parser.add_argument("--gemini_model_id", type=str, default=None, help="Specific model ID for Gemini")
     parser.add_argument("--openrouter_model_id", type=str, default=None, help="Specific model ID for OpenRouter")
     parser.add_argument("--max_depth", type=int, default=None, help="Depth limit for subquery expansions") # Default None
+    # Search Provider Arguments
+    parser.add_argument("--search_provider", type=str, choices=["duckduckgo", "searxng"], default=None, help="Search provider to use")
+    parser.add_argument("--searxng_url", type=str, default=None, help="Base URL for your SearXNG instance")
+    parser.add_argument("--search_max_results", type=int, default=None, help="Number of search results to fetch")
+    # GUI Argument
     parser.add_argument("--gui", action="store_true", help="Launch the graphical user interface") # Add GUI flag
     args = parser.parse_args()
 
@@ -89,6 +94,17 @@ def main():
             'gemini_api_key': None,
             'openrouter_api_key': None,
         },
+        'search': { # Added search defaults
+            'provider': 'duckduckgo',
+            'duckduckgo': {
+                'max_results': 5,
+            },
+            'searxng': {
+                'base_url': None,
+                'max_results': 5,
+                # 'api_key': None # Optional
+            }
+        },
         # Optional sections - add if needed
         # 'embeddings': { ... },
         # 'advanced': { ... }
@@ -124,7 +140,26 @@ def main():
         # API Keys: Config > Env Var > Default (None)
         'gemini_api_key': get_config_value(config, ['api_keys', 'gemini_api_key']) or os.getenv("GEMINI_API_KEY"),
         'openrouter_api_key': get_config_value(config, ['api_keys', 'openrouter_api_key']) or os.getenv("OPENROUTER_API_KEY"),
+
+        # Search Settings Resolution
+        'search_provider': args.search_provider if args.search_provider is not None else get_config_value(config, ['search', 'provider'], defaults['search']['provider']),
+        'searxng_url': args.searxng_url if args.searxng_url is not None else get_config_value(config, ['search', 'searxng', 'base_url'], defaults['search']['searxng']['base_url']),
+        # Resolve max_results based on the chosen provider
+        'search_max_results': args.search_max_results if args.search_max_results is not None else None # Placeholder, resolved below
     }
+
+    # Resolve search_max_results based on the selected provider
+    provider = resolved['search_provider']
+    if resolved['search_max_results'] is None: # Only resolve from config/defaults if not set by CLI
+        if provider == 'searxng':
+            resolved['search_max_results'] = get_config_value(config, ['search', 'searxng', 'max_results'], defaults['search']['searxng']['max_results'])
+        else: # Default to duckduckgo settings
+            resolved['search_max_results'] = get_config_value(config, ['search', 'duckduckgo', 'max_results'], defaults['search']['duckduckgo']['max_results'])
+
+    # --- Validate SearXNG URL if selected ---
+    if resolved['search_provider'] == 'searxng' and not resolved['searxng_url']:
+        print("[ERROR] SearXNG is selected as the provider, but searxng_url is not set in config or via --searxng_url argument.")
+        sys.exit(1)
 
     # --- Model Selection/Validation Logic (using resolved settings) ---
 

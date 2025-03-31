@@ -78,6 +78,10 @@ class SearchWorker(QThread):
                 # API keys are assumed to be handled by SearchSession/llm_utils using config/env
                 'gemini_api_key': config.get('api_keys', {}).get('gemini_api_key') or os.getenv("GEMINI_API_KEY"),
                 'openrouter_api_key': config.get('api_keys', {}).get('openrouter_api_key') or os.getenv("OPENROUTER_API_KEY"),
+                # Add search provider settings passed from MainWindow
+                'search_provider': self.params.get("search_provider", "duckduckgo"),
+                'search_max_results': self.params.get("search_limit", 5),
+                'searxng_url': self.params.get("searxng_url"), # Will be None if not SearXNG
             }
 
             # --- Instantiate SearchSession correctly ---

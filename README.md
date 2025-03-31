@@ -30,6 +30,9 @@ You can find an example report in the following link:
 
 ```bash
 pip install -r requirements.txt
+
+# If you plan to use the SearxNG search provider, you also need:
+pip install langchain-community
 ```
 
 3. *(Optional)* For GPU acceleration, install PyTorch with CUDA:
@@ -39,6 +42,7 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 ```
 *(Replace `cu118` with your CUDA version.)*
 
+*Note: `langchain-community` is required if you intend to use the SearxNG search provider (see Configuration below).*
 
 4. Make sure to update pyOpenSSL and cryptography:
 
@@ -85,9 +89,20 @@ ollama pull gemma2:2b
 If you prefer the command line, here's a sample command:
 
 ```bash
+# Example using default DuckDuckGo search
 python main.py --query "Create a structured bouldering gym workout to push my climbing from v4 to v6" \
                --web_search \
                --max_depth 2 \
+               --device cpu \
+               --top_k 10 \
+               --embedding_model colpali \
+               --rag_model gemma
+
+# Example using SearxNG search (ensure SearxNG URL is set in config.yaml or via --searxng_url)
+python main.py --query "Latest advancements in AI for drug discovery" \
+               --web_search \
+               --search_provider searxng \
+               --max_depth 1 \
                --device cpu \
                --top_k 10 \
                --embedding_model colpali \
@@ -104,15 +119,37 @@ python main.py --query "Create a structured bouldering gym workout to push my cl
 - `--device`: Device for embedding model (`cpu` or `cuda`).
 - `--top_k`: Number of local documents to retrieve.
 - `--embedding_model`: Specifies the embedding model (e.g., `colpali`, `all-minilm`, `models/embedding-001`, `openai/text-embedding-ada-002`). Default is defined in `config.yaml`.
-- `--rag_model`: Selects the LLM provider for summarization and report generation (`gemma`, `pali`, `gemini`, `openrouter`). Default in `config.yaml`.
+- `--rag_model`: Selects the LLM provider for summarization and report generation (`gemma`, `pali`, `gemini`, `openrouter`). `gemma` and `pali` use the Ollama backend. Default in `config.yaml`.
 - `--gemma_model_id`: Specific Ollama model ID (e.g., `gemma2:2b`, `llama3:8b`) if using `gemma` or `pali`.
 - `--gemini_model_id`: Specific Gemini model ID (e.g., `models/gemini-1.5-flash-latest`) if using `gemini`.
 - `--openrouter_model_id`: Specific OpenRouter model ID (e.g., `openai/gpt-3.5-turbo`, `google/gemini-flash-1.5`) if using `openrouter`.
 - `--personality`: Optional personality prompt for the RAG LLM (e.g., "scientific", "concise").
+- `--search_provider`: Selects the web search engine (`duckduckgo` or `searxng`). Default in `config.yaml`.
+- `--searxng_url`: Base URL for your SearXNG instance (required if `search_provider` is `searxng` and not set in config).
+- `--search_max_results`: Number of search results to fetch per query. Overrides provider-specific defaults in `config.yaml`.
 
 *Settings Hierarchy: Command-line arguments override `config.yaml` settings, which override internal defaults.*
 
 ---
+
+### 4. Configure `config.yaml` (Optional)
+
+The `config.yaml` file allows you to set default values for most command-line arguments and configure API keys and search providers.
+
+**Key Sections:**
+
+*   **`general`**: `corpus_dir`, `device`, `max_depth`, `web_search`.
+*   **`retrieval`**: `embedding_model`, `top_k`.
+*   **`llm`**: `rag_model`, `personality`, specific model IDs (`gemma_model_id`, etc.), `rag_report_prompt_template`.
+*   **`search`**:
+    *   `provider`: Set to `duckduckgo` (default) or `searxng`.
+    *   `duckduckgo`: Contains `max_results` for DDG.
+    *   `searxng`: Contains `base_url` (required if using SearxNG) and `max_results` for SearxNG. You might need to install `langchain-community` (`pip install langchain-community`) if using `searxng`.
+*   **`api_keys`**: Store `gemini_api_key` and `openrouter_api_key` here instead of using environment variables.
+
+---
+
+### 5. Check Results & Report
 
 ### 4. Check Results & Report
 
@@ -217,10 +254,11 @@ python main.py --query "Climate change impact on economy" \
 - **Ollama not found?** Ensure it’s installed (`ollama list` shows `gemma:2b`).
 - **Memory issues?** Use `--device cpu`.
 - **Too many subqueries?** Lower `--max_depth` to 1.
+- **SearxNG connection errors?** Verify the `base_url` in `config.yaml` or `--searxng_url` is correct and your SearxNG instance is running. Ensure `langchain-community` is installed.
 
 ---
 
-### 7. Next Steps
+### 8. Next Steps
 
 - **Try different embedding models** (`--embedding_model all-minilm`).
 - **Experiment with different RAG providers and models** (`--rag_model`, `--gemma_model_id`, etc.).
@@ -250,11 +288,15 @@ python main.py --query "Climate change impact on economy" \
   --gemini_model_id
   --openrouter_model_id
   --max_depth
+  --search_provider
+  --searxng_url
+  --search_max_results
   ```
 - **YAML Config** (e.g. `config.yaml`):
-  - Sections: `general`, `retrieval`, `llm`, `api_keys`.
+  - Sections: `general`, `retrieval`, `llm`, `search`, `api_keys`.
   - Defines defaults for most CLI flags.
   - Allows setting API keys directly (`gemini_api_key`, `openrouter_api_key`).
+  - Configures search provider (`provider`, `duckduckgo.max_results`, `searxng.base_url`, `searxng.max_results`).
 
 ### 2. Configuration & Session Setup
 
@@ -336,7 +378,8 @@ main.py:
                       │   ├─ Compute relevance_score
                       │   ├─ if relevance_score < min_relevance: skip
                       │   ├─ else:
-                      │   │   ├─ download_webpages_ddg()
+                      │   │   ├─ IF provider == 'duckduckgo': download_webpages_ddg()
+                      │   │   ├─ IF provider == 'searxng': download_webpages_searxng()
                       │   │   ├─ parse_html_to_text(), embed
                       │   │   ├─ summarize_text() → store in TOCNode
                       │   │   └─ if depth < max_depth:

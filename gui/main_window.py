@@ -24,6 +24,9 @@ except ImportError as e:
     # Handle appropriately, maybe raise or show error in GUI if possible later
     sys.exit(1)
 
+# Import config loading utility
+from config_utils import load_config, save_config # Added save_config
+
 # --- Main Window ---
 
 class MainWindow(QMainWindow):
@@ -31,6 +34,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("NanoSage GUI 🧙")
         # self.setWindowIcon(QIcon("path/to/icon.png")) # Optional
+
+        # Load initial config
+        self.config_path = "config.yaml" # Define config path
+        self.config_data = load_config(self.config_path)
 
         self.search_worker = None
         # Generative model fetchers
@@ -90,6 +97,21 @@ class MainWindow(QMainWindow):
         self.top_k_spinbox.setRange(1, 50)
         self.top_k_spinbox.setValue(3)
         config_layout.addRow("Top K Results:", self.top_k_spinbox) # Renamed label slightly
+
+        # --- Search Provider Configuration ---
+        search_group = QGroupBox("Search Settings")
+        search_layout = QFormLayout()
+        self.search_provider_combo = QComboBox()
+        self.search_provider_combo.addItems(["DuckDuckGo", "SearXNG"])
+        # Set initial value from loaded config
+        default_provider = self.config_data.get('search', {}).get('provider', 'duckduckgo')
+        provider_index = 0 if default_provider == 'duckduckgo' else 1
+        self.search_provider_combo.setCurrentIndex(provider_index)
+        search_layout.addRow("Search Provider:", self.search_provider_combo)
+        # Add more search settings here if needed (e.g., max results, SearXNG URL input)
+        search_group.setLayout(search_layout)
+        config_layout.addRow(search_group) # Add search group to main config layout
+
 
         # --- Embedding Configuration ---
         embedding_group = QGroupBox("Embedding Settings")
@@ -226,6 +248,8 @@ class MainWindow(QMainWindow):
         # Connect result buttons
         self.open_report_button.clicked.connect(self.open_report)
         self.open_folder_button.clicked.connect(self.open_results_folder)
+        # Connect search provider change signal (optional: for saving config immediately)
+        # self.search_provider_combo.currentTextChanged.connect(self.handle_search_provider_change)
 
     # --- Slot Methods ---
 
@@ -399,7 +423,20 @@ class MainWindow(QMainWindow):
                  return
             selected_generative_openrouter = self.openrouter_model_combo.currentText()
 
-        # --- Prepare Parameters ---
+        # --- Prepare Search Provider Parameters ---
+        selected_provider_text = self.search_provider_combo.currentText()
+        search_provider_key = 'duckduckgo' if selected_provider_text == "DuckDuckGo" else 'searxng'
+
+        # Get provider-specific settings from loaded config
+        search_config = self.config_data.get('search', {})
+        provider_config = search_config.get(search_provider_key, {})
+        search_limit = provider_config.get('max_results', 5) # Default to 5 if not found
+        searxng_url = search_config.get('searxng', {}).get('base_url') if search_provider_key == 'searxng' else None
+
+        # Optional: Save the selected provider back to config immediately
+        # self.save_current_config() # Uncomment if you want immediate saving
+
+        # --- Prepare All Parameters ---
         params = {
             "query": query,
             "corpus_dir": self.corpus_dir_label.text() or None,
@@ -411,7 +448,11 @@ class MainWindow(QMainWindow):
             "rag_model": rag_model_type if rag_model_type != "None" else None,
             "personality": self.personality_input.text() or None,
             "selected_gemini_model": selected_generative_gemini, # Specific generative model
-            "selected_openrouter_model": selected_generative_openrouter # Specific generative model
+            "selected_openrouter_model": selected_generative_openrouter, # Specific generative model
+            # Add resolved search settings
+            "search_provider": search_provider_key,
+            "search_limit": search_limit,
+            "searxng_url": searxng_url
             # config_path could be added if needed
         }
 
@@ -434,6 +475,22 @@ class MainWindow(QMainWindow):
         self.search_worker.start()
 
     # --- Utility & Result Handling ---
+
+    # Optional: Method to save config changes (e.g., when provider changes)
+    # def handle_search_provider_change(self, provider_text):
+    #     """Update config data when search provider changes."""
+    #     provider_key = 'duckduckgo' if provider_text == "DuckDuckGo" else 'searxng'
+    #     if 'search' not in self.config_data:
+    #         self.config_data['search'] = {}
+    #     self.config_data['search']['provider'] = provider_key
+    #     self.save_current_config()
+
+    # def save_current_config(self):
+    #     """Save the current state of self.config_data to the file."""
+    #     if save_config(self.config_path, self.config_data):
+    #         self.log_status(f"Configuration saved to {self.config_path}")
+    #     else:
+    #         self.log_status(f"[ERROR] Failed to save configuration to {self.config_path}")
 
     def log_status(self, message):
         """Append a message to the status log."""

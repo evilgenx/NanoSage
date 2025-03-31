@@ -28,3 +28,19 @@ def load_config(config_path):
         config = {}
 
     return config
+
+def save_config(config_path, config_data):
+    """Saves configuration data to a YAML file."""
+    try:
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+        print(f"[INFO] Configuration saved to: {config_path}")
+        return True
+    except yaml.YAMLError as e:
+        print(f"[ERROR] Error writing YAML file {config_path}: {e}")
+        return False
+    except Exception as e:
+        print(f"[ERROR] Failed to save config file {config_path}: {e}")
+        return False

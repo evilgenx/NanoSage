@@ -1,10 +1,12 @@
 import os
+import os
 import asyncio
 from llm_providers.utils import clean_search_query, split_query
 from llm_providers.tasks import summarize_text, chain_of_thought_query_enhancement
 import toc_tree
 from knowledge_base import late_interaction_score # Removed embed_text
-from web_search import download_webpages_ddg, parse_html_to_text, group_web_results_by_domain, sanitize_filename
+# Import both download functions
+from web_search import download_webpages_ddg, download_webpages_searxng, parse_html_to_text, group_web_results_by_domain, sanitize_filename
 from embeddings.base import BaseEmbedder # Added import
 
 async def perform_recursive_web_searches(
@@ -60,16 +62,37 @@ async def perform_recursive_web_searches(
         progress_callback(f"Searching web (Depth {current_depth}, Rel: {relevance:.2f}): '{sq_clean[:50]}...'")
         print(f"[DEBUG] Searching web for subquery '{sq_clean}' at depth={current_depth}...")
 
-        # Pass the progress_callback to the download function
-        # Use resolved web_search_limit from config (assuming it might be under 'advanced')
-        web_search_limit = config.get('advanced', {}).get("web_search_limit", 5)
-        pages = await download_webpages_ddg(
-            sq_clean,
-            limit=web_search_limit,
-            output_dir=subquery_dir,
-            progress_callback=progress_callback # Pass the callback here
-        )
-        progress_callback(f"Downloaded {len(pages)} pages for '{sq_clean[:50]}...'")
+        # --- Select and call the appropriate web search function ---
+        search_provider = resolved_settings.get('search_provider', 'duckduckgo')
+        search_limit = resolved_settings.get('search_max_results', 5) # Use the resolved limit
+        pages = []
+
+        if search_provider == 'searxng':
+            searxng_url = resolved_settings.get('searxng_url')
+            if searxng_url:
+                pages = await download_webpages_searxng(
+                    keyword=sq_clean,
+                    limit=search_limit,
+                    base_url=searxng_url,
+                    output_dir=subquery_dir,
+                    progress_callback=progress_callback
+                )
+            else:
+                progress_callback("[WARN] SearXNG provider selected but URL not found in settings. Skipping web search for this branch.")
+                print("[WARN] SearXNG provider selected but URL not found in resolved_settings.")
+        elif search_provider == 'duckduckgo':
+             pages = await download_webpages_ddg(
+                 keyword=sq_clean,
+                 limit=search_limit,
+                 output_dir=subquery_dir,
+                 progress_callback=progress_callback
+             )
+        else:
+             progress_callback(f"[WARN] Unknown search provider '{search_provider}'. Skipping web search for this branch.")
+             print(f"[WARN] Unknown search provider '{search_provider}'. Skipping web search.")
+        # --- End search function selection ---
+
+        progress_callback(f"Downloaded {len(pages)} pages via {search_provider} for '{sq_clean[:50]}...'")
         branch_web_results = []
         branch_corpus_entries = []
         for i, page in enumerate(pages):

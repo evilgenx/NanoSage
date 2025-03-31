@@ -12,6 +12,7 @@ duckduckgo_search
 beautifulsoup4
 pymupdf  # PyMuPDF for PDF handling
 pytesseract
+langchain-community # For SearxNG wrapper
 Pillow   # for image handling
 PyQt6    # For the GUI
 
