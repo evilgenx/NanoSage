@@ -10,6 +10,8 @@ requests # Added for OpenRouter API calls
 aiohttp
 duckduckgo_search
 beautifulsoup4
+lxml     # Parser engine for BeautifulSoup
+python-docx # For DOCX parsing
 pymupdf  # PyMuPDF for PDF handling
 pytesseract
 langchain-community # For SearxNG wrapper

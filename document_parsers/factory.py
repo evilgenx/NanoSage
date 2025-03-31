@@ -3,6 +3,8 @@ import os
 from .base import BaseParser
 from .text import TextParser
 from .pdf import PdfParser
+from .html import HtmlParser
+from .docx import DocxParser # Import the new parser
 
 # Cache parser instances to avoid re-initialization if needed (simple dict cache)
 _parser_cache = {}
@@ -42,9 +44,21 @@ def get_parser(file_path: str) -> BaseParser | None:
         except ImportError as e:
             print(f"[WARN] Cannot create PDF parser, dependency missing: {e}")
             return None # Cannot parse this file type
-    # Add other parsers here (e.g., .docx, .html) if needed
-    # elif extension == ".docx":
-    #     parser_instance = DocxParser()
+    elif extension in [".html", ".htm"]:
+        try:
+            # HtmlParser might raise ImportError if bs4/lxml are not installed
+            parser_instance = HtmlParser()
+        except ImportError as e:
+            print(f"[WARN] Cannot create HTML parser, dependency missing: {e}")
+            return None # Cannot parse this file type
+    elif extension == ".docx":
+        try:
+            # DocxParser might raise ImportError if python-docx is not installed
+            parser_instance = DocxParser()
+        except ImportError as e:
+            print(f"[WARN] Cannot create DOCX parser, dependency missing: {e}")
+            return None # Cannot parse this file type
+    # Add other parsers here if needed
 
     if parser_instance:
         _parser_cache[parser_key] = parser_instance # Cache the instance

@@ -10,9 +10,11 @@ from PyQt6.QtCore import QThread, pyqtSignal, QObject, QMutex, QMutexLocker # Ad
 try:
     from search_session import SearchSession
     # Import from the new provider modules
-    from llm_providers.gemini import list_gemini_models # Removed list_gemini_embedding_models
-    from llm_providers.openrouter import list_openrouter_models # Removed list_openrouter_embedding_models
-    from config_utils import load_config, save_config # Added save_config
+    from llm_providers.gemini import list_gemini_models
+    from llm_providers.openrouter import list_openrouter_models
+    # Import task functions
+    from llm_providers.tasks import extract_topics_from_text, chain_of_thought_query_enhancement
+    from config_utils import load_config, save_config
 except ImportError as e:
     # This error might be better handled by the main application window
     # or logged, rather than exiting here.
@@ -98,12 +100,50 @@ class SearchWorker(QThread):
                 selected_model_name = self.params.get("selected_openrouter_model")
             # Other RAG models like 'gemma', 'pali', 'None' don't need a specific selected model name here
 
+            # --- Load selected prompt template ---
+            output_format_name = self.params.get("output_format", "Report") # Default to Report if not provided
+            output_formats_map = config.get('llm', {}).get('output_formats', {})
+            template_path = output_formats_map.get(output_format_name)
+            template_content = None
+
+            if template_path and os.path.exists(template_path):
+                try:
+                    with open(template_path, 'r', encoding='utf-8') as f:
+                        template_content = f.read()
+                    self.progress_updated.emit(f"Loaded prompt template for '{output_format_name}' from {template_path}")
+                except Exception as e:
+                    self.progress_updated.emit(f"[Warning] Failed to read prompt template file {template_path}: {e}")
+                    # Fallback logic below handles missing content
+            else:
+                self.progress_updated.emit(f"[Warning] Prompt template path not found for format '{output_format_name}' in config or file missing: {template_path}.")
+
+            # Fallback to 'Report' template if the selected one failed or wasn't found
+            if template_content is None and output_format_name != "Report":
+                self.progress_updated.emit("Attempting to fall back to default 'Report' template...")
+                default_template_path = output_formats_map.get("Report")
+                if default_template_path and os.path.exists(default_template_path):
+                    try:
+                        with open(default_template_path, 'r', encoding='utf-8') as f:
+                            template_content = f.read()
+                        self.progress_updated.emit(f"Successfully loaded fallback 'Report' template from {default_template_path}")
+                    except Exception as e:
+                        self.progress_updated.emit(f"[Warning] Failed to read fallback 'Report' template {default_template_path}: {e}")
+                else:
+                    self.progress_updated.emit("[Warning] Default 'Report' template path not found or file missing.")
+
+            # Final check: if no template could be loaded, abort.
+            if template_content is None:
+                 self.error_occurred.emit(f"Could not load any prompt template (tried '{output_format_name}' and fallback 'Report'). Cannot proceed with RAG.")
+                 return # Stop the worker
+
             # --- Prepare resolved_settings dictionary ---
             resolved_settings = {
+                'rag_prompt_template_content': template_content, # Add the loaded template content
                 'corpus_dir': self.params.get("corpus_dir"),
                 'device': self.params.get("device", "cpu"),
                 'max_depth': self.params.get("max_depth", 1),
                 'web_search': self.params.get("web_search", False),
+                'enable_iterative_search': self.params.get("enable_iterative_search", False), # Add the new setting
                 'embedding_model': self.params.get("embedding_model_name", "colpali"), # Use 'embedding_model' key
                 'top_k': self.params.get("top_k", 3),
                 'rag_model': rag_model_type, # RAG model type (gemma, gemini, openrouter, etc.)
@@ -196,6 +236,81 @@ class SearchWorker(QThread):
                 except TypeError:
                     pass # Signal already disconnected
                 self._progress_callback_proxy = None
+
+
+class TopicExtractorWorker(QThread):
+    """Extracts topics from text using an LLM in a separate thread."""
+    topics_extracted = pyqtSignal(str) # Emits the extracted topics string
+    error_occurred = pyqtSignal(str)
+    status_update = pyqtSignal(str) # For status messages
+
+    def __init__(self, text_to_analyze, llm_config, parent=None):
+        super().__init__(parent)
+        self.text_to_analyze = text_to_analyze
+        self.llm_config = llm_config
+
+    def run(self):
+        """Executes the topic extraction task."""
+        try:
+            self.status_update.emit("Starting topic extraction...")
+            # Call the function from llm_providers.tasks
+            extracted_topics = extract_topics_from_text(
+                text=self.text_to_analyze,
+                llm_config=self.llm_config
+                # max_topics could be added as a parameter if needed
+            )
+
+            if extracted_topics.startswith("Error:"):
+                self.error_occurred.emit(f"Topic Extraction Failed: {extracted_topics}")
+            else:
+                self.status_update.emit("Topic extraction complete.")
+                self.topics_extracted.emit(extracted_topics)
+
+        except Exception as e:
+            traceback.print_exc()
+            self.error_occurred.emit(f"An unexpected error occurred during topic extraction: {e}")
+
+
+class QueryEnhancerWorker(QThread):
+    """Enhances a query using an LLM in a separate thread for preview."""
+    enhanced_query_ready = pyqtSignal(str) # Emits the enhanced query string
+    enhancement_error = pyqtSignal(str)
+    status_update = pyqtSignal(str) # For status messages
+
+    def __init__(self, original_query, llm_config, parent=None):
+        super().__init__(parent)
+        self.original_query = original_query
+        self.llm_config = llm_config
+
+    def run(self):
+        """Executes the query enhancement task."""
+        try:
+            self.status_update.emit("Enhancing query for preview...")
+            # Call the function from llm_providers.tasks
+            enhanced_query = chain_of_thought_query_enhancement(
+                query=self.original_query,
+                llm_config=self.llm_config
+            )
+
+            # Check if enhancement failed (returns original query on failure)
+            if enhanced_query == self.original_query:
+                 # Check if the original query was empty or if there was an actual error logged by the function
+                 if not self.original_query.strip():
+                     self.enhancement_error.emit("Cannot enhance empty query.")
+                 else:
+                     # Assume enhancement failed silently or returned original due to error
+                     self.status_update.emit("[Warning] Query enhancement failed or returned original query. Using original.")
+                     # Emit original query so the process can continue, but log it wasn't enhanced
+                     self.enhanced_query_ready.emit(self.original_query) # Send original back
+            elif enhanced_query.startswith("Error:"):
+                 self.enhancement_error.emit(f"Query Enhancement Failed: {enhanced_query}")
+            else:
+                self.status_update.emit("Query enhancement preview ready.")
+                self.enhanced_query_ready.emit(enhanced_query)
+
+        except Exception as e:
+            traceback.print_exc()
+            self.enhancement_error.emit(f"An unexpected error occurred during query enhancement: {e}")
 
 
 class GeminiFetcher(QThread):

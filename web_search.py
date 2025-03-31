@@ -180,7 +180,7 @@ async def download_webpages_searxng(
 
     search_results_list = []
     try:
-        timeout = aiohttp.ClientTimeout(total=30) # Increased timeout for API query to 30s
+        timeout = aiohttp.ClientTimeout(total=60) # Increased timeout for API query to 60s
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(search_url, headers={'Accept': 'application/json'}) as response:
                 response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)

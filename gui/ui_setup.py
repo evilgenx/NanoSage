@@ -38,6 +38,12 @@ def setup_main_window_ui(main_window):
     main_window.query_input = QTextEdit()
     main_window.query_input.setPlaceholderText("Enter your research query here...")
     query_layout.addWidget(main_window.query_input)
+
+    # Add the new checkbox for topic extraction
+    main_window.extract_topics_checkbox = QCheckBox("Extract Topics from Input (for large text)")
+    main_window.extract_topics_checkbox.setToolTip("Check this to use the LLM to extract key topics/phrases from the input text above, instead of treating it as a direct query. Useful for pasting articles or long text.")
+    query_layout.addWidget(main_window.extract_topics_checkbox)
+
     query_group.setLayout(query_layout)
     left_layout.addWidget(query_group)
 
@@ -79,6 +85,10 @@ def setup_main_window_ui(main_window):
     main_window.search_provider_combo = QComboBox()
     main_window.search_provider_combo.addItems(["DuckDuckGo", "SearXNG"])
     search_layout.addRow("Search Provider:", main_window.search_provider_combo)
+
+    # Iterative Search Checkbox
+    main_window.iterative_search_checkbox = QCheckBox("Enable Iterative Search (Experimental)")
+    search_layout.addRow(main_window.iterative_search_checkbox)
 
     # SearXNG Specific Settings (visibility handled in MainWindow)
     main_window.searxng_base_url_label = QLabel("SearXNG URL:")
@@ -145,6 +155,12 @@ def setup_main_window_ui(main_window):
     main_window.personality_label = QLabel("RAG Personality:")
     rag_layout.addRow(main_window.personality_label, main_window.personality_input)
 
+    # Add Output Format Selection
+    main_window.output_format_label = QLabel("Output Format:")
+    main_window.output_format_combo = QComboBox()
+    # Items will be populated from config in MainWindow's load_config method
+    rag_layout.addRow(main_window.output_format_label, main_window.output_format_combo)
+
     config_tabs.addTab(rag_tab, "RAG")
 
     # Add the tab widget to the main left layout
@@ -199,15 +215,20 @@ def setup_main_window_ui(main_window):
     results_layout = QFormLayout()
     main_window.report_path_label = QLabel("Report will appear here.")
     main_window.report_path_label.setWordWrap(True)
+    main_window.report_path_label = QLabel("Report will appear here.")
+    main_window.report_path_label.setWordWrap(True)
     main_window.open_report_button = QPushButton("Open Report")
     main_window.open_folder_button = QPushButton("Open Results Folder")
+    main_window.share_email_button = QPushButton("Share via Email") # Added email button
     main_window.open_report_button.setEnabled(False)
     main_window.open_folder_button.setEnabled(False)
+    main_window.share_email_button.setEnabled(False) # Initially disabled
 
     results_layout.addRow("Report Path:", main_window.report_path_label)
     button_layout = QHBoxLayout()
     button_layout.addWidget(main_window.open_report_button)
     button_layout.addWidget(main_window.open_folder_button)
+    button_layout.addWidget(main_window.share_email_button) # Added email button to layout
     results_layout.addRow(button_layout)
 
     results_group.setLayout(results_layout)

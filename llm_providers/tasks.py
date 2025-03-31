@@ -56,6 +56,65 @@ def chain_of_thought_query_enhancement(query, llm_config: dict = {}):
         # Log the exception details if needed
         return query # Fallback in case of unexpected errors during the call
 
+def extract_topics_from_text(text: str, llm_config: dict = {}, max_topics=5) -> str:
+    """
+    Extracts key topics or phrases from a given text using the specified LLM.
+
+    Args:
+        text (str): The input text to analyze.
+        llm_config (dict): Configuration for the LLM provider (provider, model_id, api_key, personality).
+        max_topics (int): The maximum number of topics/phrases to extract.
+
+    Returns:
+        str: A string containing the extracted topics/phrases, likely separated by newlines, or an error message.
+    """
+    # Extract config with defaults
+    provider = llm_config.get("provider", "gemma")
+    model_id = llm_config.get("model_id")
+    api_key = llm_config.get("api_key")
+    personality = llm_config.get("personality")
+
+    prompt = (
+        f"Analyze the following text and identify the main topics or key phrases. "
+        f"Extract up to {max_topics} distinct topics/phrases that best represent the core subject matter. "
+        f"Focus on nouns, noun phrases, or concepts discussed.\n\n"
+        f"Text:\n\"\"\"\n{text}\n\"\"\"\n\n"
+        f"Output ONLY the topics/phrases, one per line. Do not include numbering, bullets, explanations, or any other text."
+    )
+
+    raw_output = ""
+    print(f"[INFO] Extracting topics from text using {provider}...")
+    try:
+        if provider == "gemini":
+            if not model_id:
+                print("[ERROR] Gemini selected for topic extraction, but no model specified.")
+                return "Error: Gemini model not specified."
+            raw_output = call_gemini(prompt, model_name=model_id, gemini_api_key=api_key)
+        elif provider == "openrouter":
+            if not model_id:
+                print("[ERROR] OpenRouter selected for topic extraction, but no model specified.")
+                return "Error: OpenRouter model not specified."
+            raw_output = call_openrouter(prompt, model=model_id, personality=personality, openrouter_api_key=api_key)
+        else: # Default to gemma/ollama
+            if provider != "gemma":
+                print(f"[WARN] Unknown provider '{provider}' for topic extraction, defaulting to gemma.")
+            gemma_model = model_id or "gemma2:2b" # Example default
+            raw_output = call_gemma(prompt, model=gemma_model, personality=personality)
+
+        if not raw_output or raw_output.startswith("Error:"):
+            error_msg = raw_output if raw_output else "Error: Topic extraction failed (empty response)."
+            print(f"[WARN] Topic extraction failed or returned error: {error_msg}")
+            return error_msg # Return the error message
+
+        # Return the raw output, assuming the LLM followed the prompt (one topic per line)
+        # Further parsing could be added here if needed (e.g., stripping extra whitespace)
+        return raw_output.strip()
+
+    except Exception as e:
+        print(f"[ERROR] Exception during topic extraction ({provider}): {e}")
+        return f"Error: Failed to extract topics with {provider} - {e}"
+
+
 # Modified summarize_text to accept llm_config dictionary (reordered params)
 def summarize_text(text, llm_config: dict = {}, max_chars=6000):
     """Summarizes text, potentially chunking, using the specified RAG model configured in llm_config."""
@@ -194,3 +253,65 @@ def follow_up_conversation(follow_up_prompt, llm_config: dict = {}):
     except Exception as e:
         print(f"[ERROR] Exception during follow-up conversation ({provider}): {e}")
         return f"Error: Failed to handle follow-up with {provider} - {e}"
+
+
+def generate_followup_queries(initial_query: str, context_summary: str, llm_config: dict = {}, max_queries=3) -> list[str]:
+    """
+    Generates potential follow-up search queries based on the initial query and a summary of the context found so far.
+
+    Args:
+        initial_query (str): The original (or enhanced) user query.
+        context_summary (str): A summary of the information gathered in the first pass (web + local).
+        llm_config (dict): Configuration for the LLM provider (provider, model_id, api_key, personality).
+        max_queries (int): The maximum number of follow-up queries to generate.
+
+    Returns:
+        list[str]: A list of generated follow-up query strings.
+    """
+    # Extract config with defaults
+    provider = llm_config.get("provider", "gemma")
+    model_id = llm_config.get("model_id")
+    api_key = llm_config.get("api_key")
+    personality = llm_config.get("personality") # Personality might influence query style
+
+    prompt = (
+        f"You are a research assistant analyzing search results.\n"
+        f"Initial Query: \"{initial_query}\"\n\n"
+        f"Summary of Information Found So Far:\n\"\"\"\n{context_summary}\n\"\"\"\n\n"
+        f"Based on the initial query and the summary, identify key gaps, ambiguities, or areas needing deeper investigation. "
+        f"Generate up to {max_queries} specific, concise search queries that would help address these points. "
+        f"Output ONLY the search queries, one per line. Do not include numbering, bullets, or any other text."
+    )
+
+    raw_output = ""
+    print(f"[INFO] Generating follow-up queries using {provider}...")
+    try:
+        if provider == "gemini":
+            if not model_id:
+                print("[ERROR] Gemini selected for follow-up query generation, but no model specified.")
+                return []
+            raw_output = call_gemini(prompt, model_name=model_id, gemini_api_key=api_key)
+        elif provider == "openrouter":
+            if not model_id:
+                print("[ERROR] OpenRouter selected for follow-up query generation, but no model specified.")
+                return []
+            raw_output = call_openrouter(prompt, model=model_id, personality=personality, openrouter_api_key=api_key)
+        else: # Default to gemma/ollama
+            if provider != "gemma":
+                print(f"[WARN] Unknown provider '{provider}' for follow-up query generation, defaulting to gemma.")
+            gemma_model = model_id or "gemma2:2b" # Example default
+            raw_output = call_gemma(prompt, model=gemma_model, personality=personality)
+
+        if not raw_output or raw_output.startswith("Error:"):
+            print(f"[WARN] Follow-up query generation failed or returned error: {raw_output}")
+            return []
+
+        # Parse the output: split by lines, strip whitespace, filter empty lines
+        queries = [line.strip() for line in raw_output.splitlines() if line.strip()]
+
+        # Limit the number of queries
+        return queries[:max_queries]
+
+    except Exception as e:
+        print(f"[ERROR] Exception during follow-up query generation ({provider}): {e}")
+        return [] # Return empty list on error

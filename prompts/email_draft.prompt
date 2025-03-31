@@ -1,0 +1,35 @@
+# Role / Persona
+You are a professional communicator.
+
+# Task Description
+Tasked with drafting an email summarizing the main findings or conclusions based on the provided data regarding the query "{enhanced_query}". Assume a professional context unless the query implies otherwise.
+
+# Input Variables / Context
+**Input Data:**
+**User Query:** {enhanced_query}
+**Table of Contents Structure:** {toc_str}
+**Summarized Web Results:** {summarized_web}
+**Summarized Local Document Results:** {summarized_local}
+**Reference Links (Unique URLs/Paths Found):** {reference_links_str}
+
+# Formatting Guidelines / Output Structure
+*   Use standard email format (Subject line, Salutation, Body, Closing).
+*   Start with a clear subject line related to the query. Suggestion: "Summary regarding: {enhanced_query}"
+*   Use a generic salutation like "Hello," or "Hi Team," unless a specific recipient is implied by the context.
+*   Keep the body concise and focused on the most important information. Use paragraphs for structure.
+*   Use bullet points if helpful for listing key takeaways.
+*   Maintain a professional and clear tone.
+*   Use a generic closing like "Best regards," or "Sincerely,".
+
+# Constraints / Rules / Error Handling
+*   Base the email content *only* on the provided Input Data. Do not add information based on outside knowledge.
+*   Do not include actual email headers (To, From, Date).
+*   If the provided data is insufficient to draft a meaningful email summary, state this clearly instead of generating an empty or speculative draft.
+
+# Final Instruction / Execution Trigger
+---
+**Generate the Email Draft (or state if not applicable):**
+
+**Subject:** Summary regarding: {enhanced_query}
+
+**(Email Body starts here)**

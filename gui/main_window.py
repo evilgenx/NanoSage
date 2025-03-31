@@ -4,6 +4,8 @@
 import sys
 import os
 import subprocess # To open files/folders
+import webbrowser # Added for mailto link
+import urllib.parse # Added for URL encoding
 from PyQt6.QtWidgets import (
     QMainWindow, QTextEdit, QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox,
     QCheckBox, QFileDialog, QMessageBox # Removed unused layout/widget imports
@@ -17,7 +19,8 @@ from .ui_setup import setup_main_window_ui
 # Import worker threads using relative import
 try:
     from .workers import (
-        SearchWorker, GeminiFetcher, OpenRouterFetcher
+        SearchWorker, GeminiFetcher, OpenRouterFetcher, TopicExtractorWorker,
+        QueryEnhancerWorker # Added QueryEnhancerWorker
         # Removed GeminiEmbeddingFetcher, OpenRouterEmbeddingFetcher as they are no longer used
     )
 except ImportError as e:
@@ -44,6 +47,8 @@ class MainWindow(QMainWindow):
         self.config_data = load_config(self.config_path)
 
         self.search_worker = None
+        self.topic_extractor_worker = None
+        self.query_enhancer_worker = None # Added worker instance variable
         # Generative model fetchers
         self.gemini_fetcher = None
         self.openrouter_fetcher = None
@@ -91,11 +96,26 @@ class MainWindow(QMainWindow):
         self.handle_rag_model_change(default_rag_model) # Trigger visibility updates
 
         # Set other config-dependent initial states if any (e.g., checkbox, spinboxes)
-        self.web_search_checkbox.setChecked(self.config_data.get('search', {}).get('web_search_enabled', True)) # Example
-        self.max_depth_spinbox.setValue(self.config_data.get('search', {}).get('max_depth', 1))
-        self.top_k_spinbox.setValue(self.config_data.get('search', {}).get('top_k', 3))
+        search_config_init = self.config_data.get('search', {}) # Get search config once
+        self.web_search_checkbox.setChecked(search_config_init.get('web_search_enabled', True)) # Example
+        self.iterative_search_checkbox.setChecked(search_config_init.get('enable_iterative_search', False)) # Initialize new checkbox
+        self.max_depth_spinbox.setValue(search_config_init.get('max_depth', 1))
+        self.top_k_spinbox.setValue(search_config_init.get('top_k', 3))
         self.corpus_dir_label.setText(self.config_data.get('corpus', {}).get('path', '')) # Example
         self.personality_input.setText(self.config_data.get('rag', {}).get('personality', ''))
+
+        # Populate Output Format dropdown
+        self.output_format_combo.clear()
+        output_formats_config = self.config_data.get('llm', {}).get('output_formats', {})
+        if output_formats_config:
+            self.output_format_combo.addItems(output_formats_config.keys())
+            # Optionally set a default, e.g., 'Report' if it exists
+            if "Report" in output_formats_config:
+                self.output_format_combo.setCurrentText("Report")
+        else:
+            self.log_status("[Warning] No 'output_formats' found in config.yaml under 'llm'. Dropdown will be empty.")
+            self.output_format_combo.setEnabled(False)
+
 
         # Connect signals after UI is fully set up and initialized
         self._connect_signals()
@@ -119,6 +139,7 @@ class MainWindow(QMainWindow):
         # Connect result buttons
         self.open_report_button.clicked.connect(self.open_report)
         self.open_folder_button.clicked.connect(self.open_results_folder)
+        self.share_email_button.clicked.connect(self.share_report_email) # Connect new button
         # Connect search provider change signal to show/hide SearXNG options
         self.search_provider_combo.currentTextChanged.connect(self.handle_search_provider_change)
         # Connect the engine selector's signal
@@ -128,6 +149,83 @@ class MainWindow(QMainWindow):
 
 
     # --- Slot Methods ---
+
+    # --- Query Enhancement Slots ---
+    def on_enhanced_query_ready(self, enhanced_query_preview):
+        """Handles the signal when the enhanced query preview is ready."""
+        self.log_status(f"Enhanced Query Preview: {enhanced_query_preview}")
+        # IMPORTANT: Proceed with the search using the ORIGINAL query text
+        # that was present in the input box when the enhancement started.
+        original_query = self.query_input.toPlainText().strip() # Get original text again
+
+        if not original_query:
+             # This case should ideally be caught before starting the enhancer, but double-check
+             self.log_status("[Error] Original query is empty after enhancement preview. Aborting search.")
+             self.on_enhancement_error("Original query became empty.") # Treat as error
+             return
+
+        # Now, prepare parameters and start the actual SearchWorker
+        self.log_status("Proceeding with search using the original query...")
+        self._start_main_search_worker(original_query) # Pass original query to the search worker starter
+
+    def on_enhancement_error(self, error_message):
+        """Handles errors during query enhancement preview."""
+        self.log_status(f"Query Enhancement Preview Error: {error_message}")
+        QMessageBox.critical(self, "Query Enhancement Error", error_message)
+        # Reset UI state
+        self.run_button.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.cancel_button.setVisible(False)
+        self.cancel_button.setEnabled(False)
+        self.query_enhancer_worker = None # Clear worker reference
+
+    def on_enhancement_finished(self):
+        """Called when the query enhancement thread finishes (success or error)."""
+        # General cleanup if needed, though success/error slots might handle it.
+        if self.query_enhancer_worker: # Check if it finished normally
+            # UI state should be handled by success/error slots already
+            self.query_enhancer_worker = None
+
+    # --- Topic Extraction Slots ---
+
+    def on_topics_extracted(self, topics_string):
+        """Handles the signal when topics are successfully extracted."""
+        self.log_status("Topics extracted successfully.")
+        self.query_input.setPlainText(topics_string) # Populate input field
+        self.extract_topics_checkbox.setChecked(False) # Uncheck the box
+        # Re-enable run button, hide progress/cancel as extraction is done
+        self.run_button.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.cancel_button.setVisible(False)
+        self.cancel_button.setEnabled(False)
+        self.topic_extractor_worker = None # Clear worker reference
+        QMessageBox.information(self, "Topics Extracted", "Extracted topics have been placed in the query box.\nReview or edit them, then click 'Run Search' again to search using these topics.")
+
+    def on_topic_extraction_error(self, error_message):
+        """Handles errors during topic extraction."""
+        self.log_status(f"Topic Extraction Error: {error_message}")
+        QMessageBox.critical(self, "Topic Extraction Error", error_message)
+        # Reset UI state
+        self.run_button.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.cancel_button.setVisible(False)
+        self.cancel_button.setEnabled(False)
+        self.topic_extractor_worker = None # Clear worker reference
+        # Keep the checkbox checked so user knows it failed
+        # self.extract_topics_checkbox.setChecked(False)
+
+    def on_topic_extraction_finished(self):
+        """Called when the topic extraction thread finishes (success or error)."""
+        # This might not be strictly necessary if handled in success/error slots,
+        # but good for ensuring UI state is reset if worker finishes unexpectedly.
+        if self.topic_extractor_worker: # Check if it finished normally or was cleared already
+            # Reset UI only if enhancer isn't also running (unlikely scenario)
+            if not (self.query_enhancer_worker and self.query_enhancer_worker.isRunning()):
+                self.run_button.setEnabled(True)
+                self.progress_bar.setVisible(False)
+                self.cancel_button.setVisible(False)
+                self.cancel_button.setEnabled(False)
+            self.topic_extractor_worker = None
 
     def _handle_searxng_engine_selection_change(self, selected_engines):
         """Update the config when SearXNG engine selection changes."""
@@ -288,50 +386,128 @@ class MainWindow(QMainWindow):
     # --- Search Execution ---
 
     def start_search(self):
-        """Validate inputs and start the SearchWorker thread."""
+        """
+        Validate inputs and start the appropriate worker thread:
+        1. Topic Extraction (if checkbox checked)
+        2. Query Enhancement Preview (if checkbox unchecked)
+        3. Main Search (triggered after step 1 or 2 completes)
+        """
         # --- Input Validation ---
-        if self.search_worker and self.search_worker.isRunning():
-            self.log_status("Search is already in progress.")
+        # Check if any worker is running
+        if (self.search_worker and self.search_worker.isRunning()) or \
+           (self.topic_extractor_worker and self.topic_extractor_worker.isRunning()) or \
+           (self.query_enhancer_worker and self.query_enhancer_worker.isRunning()): # Added check for enhancer
+            self.log_status("An operation (search, topic extraction, or enhancement preview) is already in progress.")
             return
 
-        query = self.query_input.toPlainText().strip()
-        if not query:
-            QMessageBox.warning(self, "Input Error", "Please enter a search query.")
+        query_or_text = self.query_input.toPlainText().strip()
+        if not query_or_text:
+            QMessageBox.warning(self, "Input Error", "Please enter text in the query box.")
             return
 
+        # --- Shared Validation for LLM Tasks (Extraction & Enhancement) ---
+        # Both topic extraction and enhancement require a RAG model selection
+        rag_model_type = self.rag_model_combo.currentText()
+        selected_generative_gemini = None
+        selected_generative_openrouter = None
+
+        if rag_model_type == "None":
+            QMessageBox.warning(self, "Input Error", "Topic extraction or query enhancement preview requires a RAG model (Gemini, OpenRouter, or Gemma) to be selected.")
+            return
+        elif rag_model_type == "gemini":
+            if self.gemini_model_combo.count() == 0 or not self.gemini_model_combo.currentText():
+                QMessageBox.warning(self, "Input Error", f"{'Topic extraction' if self.extract_topics_checkbox.isChecked() else 'Query enhancement'} needs a Gemini generative model. Please fetch and select one.")
+                return
+            selected_generative_gemini = self.gemini_model_combo.currentText()
+        elif rag_model_type == "openrouter":
+            if self.openrouter_model_combo.count() == 0 or not self.openrouter_model_combo.currentText():
+                QMessageBox.warning(self, "Input Error", f"{'Topic extraction' if self.extract_topics_checkbox.isChecked() else 'Query enhancement'} needs an OpenRouter generative model. Please fetch and select one.")
+                return
+            selected_generative_openrouter = self.openrouter_model_combo.currentText()
+
+        # Prepare LLM config (used by both topic extractor and query enhancer)
+        llm_config = {
+            "provider": rag_model_type,
+            "model_id": selected_generative_gemini or selected_generative_openrouter, # Pass the specific model if applicable
+            "api_key": self.config_data.get('api_keys', {}).get(f'{rag_model_type}_api_key'), # Get relevant API key
+            "personality": self.personality_input.text() or None
+        }
+
+        # --- Action based on Checkbox State ---
+        if self.extract_topics_checkbox.isChecked():
+            # --- Start Topic Extractor Worker ---
+            self.log_status("Topic extraction requested...")
+            self.log_status("Starting topic extraction worker...")
+            self.run_button.setEnabled(False)
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0) # Indeterminate
+            # Note: Cancellation for topic extraction isn't implemented here, assumed quick.
+
+            self.topic_extractor_worker = TopicExtractorWorker(query_or_text, llm_config, self)
+            self.topic_extractor_worker.status_update.connect(self.log_status)
+            self.topic_extractor_worker.topics_extracted.connect(self.on_topics_extracted)
+            self.topic_extractor_worker.error_occurred.connect(self.on_topic_extraction_error)
+            self.topic_extractor_worker.finished.connect(self.on_topic_extraction_finished) # General cleanup
+            self.topic_extractor_worker.start()
+            # Stop here, wait for extraction to finish before user clicks Run again
+
+        else:
+            # --- Start Query Enhancement Preview Worker ---
+            self.log_status("Starting query enhancement preview...")
+            self.run_button.setEnabled(False)
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0) # Indeterminate
+            # Note: Cancellation for enhancement isn't implemented here, assumed quick.
+
+            self.query_enhancer_worker = QueryEnhancerWorker(query_or_text, llm_config, self)
+            self.query_enhancer_worker.status_update.connect(self.log_status)
+            self.query_enhancer_worker.enhanced_query_ready.connect(self.on_enhanced_query_ready) # Connect to new slot
+            self.query_enhancer_worker.enhancement_error.connect(self.on_enhancement_error) # Connect to new error slot
+            self.query_enhancer_worker.finished.connect(self.on_enhancement_finished) # General cleanup
+            self.query_enhancer_worker.start()
+            # Stop here, wait for enhancement preview to finish, which then triggers the search worker
+
+
+    def _start_main_search_worker(self, query_to_use):
+        """
+        Internal method to prepare parameters and start the main SearchWorker.
+        This is called AFTER topic extraction (if used) or query enhancement preview.
+        """
+        self.log_status("Preparing to start main search worker...")
+
+        # --- Standard Search Input Validation (Run again before starting search) ---
         # Embedding settings validation
         embedding_device = self.device_combo.currentText()
         embedding_model_name = self.embedding_model_combo.currentText()
         if not embedding_model_name:
              QMessageBox.warning(self, "Input Error", f"Please select an Embedding Model for the '{embedding_device}' device.")
+             self.run_button.setEnabled(True) # Re-enable button on validation fail
+             self.progress_bar.setVisible(False)
              return
-        if embedding_device in ["Gemini", "OpenRouter"] and self.embedding_model_combo.count() == 0:
-             QMessageBox.warning(self, "Input Error", f"Please fetch and select an Embedding Model for {embedding_device}.")
-             return
-
-
-        # RAG settings validation
+        # RAG settings validation (only if RAG model is selected)
+        # Re-fetch RAG settings as they might have changed while preview was running
         rag_model_type = self.rag_model_combo.currentText()
         selected_generative_gemini = None
         selected_generative_openrouter = None
-
         if rag_model_type == "gemini":
             if self.gemini_model_combo.count() == 0 or not self.gemini_model_combo.currentText():
                  QMessageBox.warning(self, "Input Error", "RAG Model is Gemini, but no generative model selected. Please fetch and select one.")
+                 self.run_button.setEnabled(True) # Re-enable button on validation fail
+                 self.progress_bar.setVisible(False)
                  return
             selected_generative_gemini = self.gemini_model_combo.currentText()
         elif rag_model_type == "openrouter":
             if self.openrouter_model_combo.count() == 0 or not self.openrouter_model_combo.currentText():
                  QMessageBox.warning(self, "Input Error", "RAG Model is OpenRouter, but no generative model selected. Please fetch and select one.")
+                 self.run_button.setEnabled(True) # Re-enable button on validation fail
+                 self.progress_bar.setVisible(False)
                  return
             selected_generative_openrouter = self.openrouter_model_combo.currentText()
 
-        # --- Prepare Search Provider Parameters ---
+        # --- Save Current Config & Prepare Search Provider Parameters ---
         selected_provider_text = self.search_provider_combo.currentText()
         search_provider_key = 'duckduckgo' if selected_provider_text == "DuckDuckGo" else 'searxng'
 
-        # Get provider-specific settings from loaded config
-        # --- Save Current Config & Prepare Search Provider Parameters ---
         search_config = self.config_data.setdefault('search', {}) # Ensure 'search' key exists
         search_config['provider'] = search_provider_key # Save selected provider
 
@@ -345,99 +521,90 @@ class MainWindow(QMainWindow):
         searxng_engines = None
 
         if search_provider_key == 'searxng':
-            # Read from GUI and update config_data
-            # Read from GUI and update config_data (excluding engines, which are handled by signal)
+            # Read from GUI and update config_data (excluding engines, handled by signal)
             searxng_url = self.searxng_base_url_input.text().strip() or None
             searxng_time_range = self.searxng_time_range_input.text().strip() or None
             searxng_categories = self.searxng_categories_input.text().strip() or None
-            # searxng_engines = self.searxng_engines_input.text().strip() or None # Removed old input reading
 
             searxng_config['base_url'] = searxng_url
             searxng_config['time_range'] = searxng_time_range
             searxng_config['categories'] = searxng_categories
-            # searxng_config['engines'] = searxng_engines # Engine saving is handled by the signal slot
 
-            # Read the current engine selection directly from config_data (updated by the slot)
+            # Read current engine selection from config_data (updated by the slot)
             searxng_engines = self.config_data.get('search', {}).get('searxng', {}).get('engines', [])
-            if not isinstance(searxng_engines, list): # Ensure it's a list
-                searxng_engines = []
+            if not isinstance(searxng_engines, list): searxng_engines = []
 
-            # Note: max_results for searxng is read inside download_webpages_searxng
-
-            # Try saving the updated config
+            # Try saving updated config
             if save_config(self.config_path, self.config_data):
                 self.log_status(f"SearXNG settings saved to {self.config_path}")
             else:
                 self.log_status(f"[ERROR] Failed to save configuration to {self.config_path}")
                 QMessageBox.warning(self, "Config Error", f"Could not save settings to {self.config_path}")
-                # Decide if you want to proceed without saving or stop
-                # return # Uncomment to stop if saving fails
+                # return # Optional: stop if saving fails
 
-            # Use the limit from the config for searxng (read internally by worker)
-            search_limit = searxng_config.get('max_results', 5)
+            search_limit = searxng_config.get('max_results', 5) # Limit read internally
 
         elif search_provider_key == 'duckduckgo':
-            # Use the limit from the config for duckduckgo
             search_limit = ddg_config.get('max_results', 5)
-            # Try saving the updated config (only provider changed)
+            # Try saving updated config (only provider changed)
             if save_config(self.config_path, self.config_data):
                  self.log_status(f"Search provider saved to {self.config_path}")
             else:
                  self.log_status(f"[ERROR] Failed to save configuration to {self.config_path}")
 
-
-        # --- Prepare All Parameters for Worker ---
-        params = {
-            "query": query,
+        # --- Prepare All Parameters for Search Worker ---
+        search_params = {
+            "query": query_to_use, # Use the query passed to this method
             "corpus_dir": self.corpus_dir_label.text() or None,
             "web_search": self.web_search_checkbox.isChecked(),
+            "enable_iterative_search": self.iterative_search_checkbox.isChecked(),
             "max_depth": self.max_depth_spinbox.value(),
             "top_k": self.top_k_spinbox.value(),
-            "device": embedding_device, # Pass the selected embedding device
-            "embedding_model_name": embedding_model_name, # Pass the specific embedding model name
+            "device": embedding_device,
+            "embedding_model_name": embedding_model_name,
             "rag_model": rag_model_type if rag_model_type != "None" else None,
             "personality": self.personality_input.text() or None,
-            "selected_gemini_model": selected_generative_gemini, # Specific generative model
-            "selected_openrouter_model": selected_generative_openrouter, # Specific generative model
-            # Add resolved search settings
+            "selected_gemini_model": selected_generative_gemini,
+            "selected_openrouter_model": selected_generative_openrouter,
+            # Search settings
             "search_provider": search_provider_key,
-            "search_limit": search_limit, # Pass the resolved limit for DDG
-            # Pass SearXNG specific params read from GUI (worker will use config, but pass for clarity/potential override)
+            "search_limit": search_limit,
             "searxng_url": searxng_url,
             "searxng_time_range": searxng_time_range,
             "searxng_categories": searxng_categories,
-            "searxng_engines": searxng_engines, # Pass the list read from config_data
-            "config_path": self.config_path # Pass config path so worker can reload fresh config
+            "searxng_engines": searxng_engines,
+            "config_path": self.config_path,
+            # Add selected output format
+            "output_format": self.output_format_combo.currentText()
         }
 
-        # --- Start Worker ---
-
-        self.log_status("Starting search...")
+        # --- Start Search Worker ---
+        self.log_status("Starting main search worker...")
+        # Ensure Run button is disabled (might have been re-enabled by error handlers)
         self.run_button.setEnabled(False)
         self.open_report_button.setEnabled(False)
         self.open_folder_button.setEnabled(False)
-        self.report_path_label.setText("Running...")
+        self.share_email_button.setEnabled(False)
+        self.report_path_label.setText("Running Search...")
         self.current_report_path = None
         self.current_results_dir = None
 
-        # Show and start indeterminate progress bar
+        # Ensure progress bar and cancel button are visible/enabled for the main search
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0) # Indeterminate mode
-
-        # Show and enable cancel button
+        self.progress_bar.setRange(0, 0) # Indeterminate
         self.cancel_button.setVisible(True)
         self.cancel_button.setEnabled(True)
 
-        # --- Call initial visibility handler for search provider ---
+        # Ensure search provider visibility is correct before starting
         self.handle_search_provider_change(self.search_provider_combo.currentText())
 
-
-        self.search_worker = SearchWorker(params, self)
+        self.search_worker = SearchWorker(search_params, self)
         self.search_worker.progress_updated.connect(self.log_status)
         self.search_worker.search_complete.connect(self.on_search_complete)
         self.search_worker.error_occurred.connect(self.on_search_error)
         self.search_worker.finished.connect(self.on_search_finished)
         self.search_worker.start()
+
 
     # --- Utility & Result Handling ---
 
@@ -470,6 +637,7 @@ class MainWindow(QMainWindow):
         self.report_path_label.setText(report_path)
         self.open_report_button.setEnabled(True)
         self.open_folder_button.setEnabled(True)
+        self.share_email_button.setEnabled(True) # Enable email button on completion
 
     def on_search_error(self, error_message):
         """Show error message if search fails."""
@@ -479,26 +647,37 @@ class MainWindow(QMainWindow):
 
 
     def on_search_finished(self):
-        """Called when the search thread finishes (success or error)."""
+        """Called when the SearchWorker thread finishes (success or error)."""
+        # This is only for the SearchWorker, not the TopicExtractorWorker
         self.run_button.setEnabled(True)
-        self.search_worker = None # Allow starting a new search
-        # Hide and reset progress bar
+        self.search_worker = None # Clear worker reference
+        if not self.current_report_path: # Check if search actually completed successfully
+            self.open_report_button.setEnabled(False)
+            self.open_folder_button.setEnabled(False)
+            self.share_email_button.setEnabled(False)
+
         self.progress_bar.setVisible(False)
         self.progress_bar.setRange(0, 100) # Reset range
-        # Hide and disable cancel button
         self.cancel_button.setVisible(False)
         self.cancel_button.setEnabled(False)
 
     def cancel_search(self):
-        """Requests cancellation of the currently running search worker."""
+        """Requests cancellation of the currently running SearchWorker."""
+        # Note: Cancellation for TopicExtractorWorker is not implemented
         if self.search_worker and self.search_worker.isRunning():
             self.log_status("Requesting search cancellation...")
-            self.search_worker.request_cancellation() # Need to implement this method in SearchWorker
-            self.cancel_button.setEnabled(False) # Prevent multiple clicks
-            self.log_status("Cancellation requested. Waiting for worker to stop...")
+            self.search_worker.request_cancellation()
+            self.cancel_button.setEnabled(False) # Correctly indented now
+            self.log_status("Cancellation requested. Waiting for search worker to stop...") # Correctly indented now
+        # Add checks for other workers (though they are short-lived)
+        elif self.topic_extractor_worker and self.topic_extractor_worker.isRunning():
+            self.log_status("Topic extraction is running. Cancellation not implemented for this step.")
+            # self.topic_extractor_worker.terminate() # Avoid terminate if possible
+        elif self.query_enhancer_worker and self.query_enhancer_worker.isRunning():
+             self.log_status("Query enhancement preview is running. Cancellation not implemented for this step.")
+             # self.query_enhancer_worker.terminate() # Avoid terminate if possible
         else:
-            self.log_status("No search running to cancel.")
-
+            self.log_status("No cancellable operation running.")
 
     def open_report(self):
         """Open the generated report file using the default system viewer."""
@@ -535,24 +714,59 @@ class MainWindow(QMainWindow):
         else:
              QMessageBox.warning(self, "Folder Not Found", "The results directory does not exist or path is not set.")
 
+    def share_report_email(self):
+        """Open the default email client with a pre-filled message."""
+        if self.current_report_path and os.path.exists(self.current_report_path):
+            try:
+                subject = "NanoSage Research Report"
+                body = (
+                    f"Please find the research report attached.\n\n"
+                    f"You can find the file at:\n{self.current_report_path}\n\n"
+                    f"(Please attach the file manually before sending)"
+                )
+                # URL encode subject and body
+                encoded_subject = urllib.parse.quote(subject)
+                encoded_body = urllib.parse.quote(body)
+
+                mailto_url = f"mailto:?subject={encoded_subject}&body={encoded_body}"
+
+                webbrowser.open(mailto_url)
+                self.log_status(f"Attempting to open email client for report: {self.current_report_path}")
+            except Exception as e:
+                self.log_status(f"Error opening email client: {e}")
+                QMessageBox.warning(self, "Email Error", f"Could not open the email client:\n{e}")
+        else:
+            QMessageBox.warning(self, "File Not Found", "The report file does not exist or path is not set. Cannot share.")
+
+
     def closeEvent(self, event):
         """Ensure threads are stopped on close."""
-        # Add logic here if threads need graceful shutdown
+        # Stop SearchWorker if running
         if self.search_worker and self.search_worker.isRunning():
-             # Optionally wait or terminate
-             pass
+             self.log_status("Attempting to cancel search on close...")
+             self.search_worker.request_cancellation()
+             self.search_worker.wait(5000) # Wait up to 5 seconds
+             if self.search_worker.isRunning():
+                 self.log_status("Search worker did not stop gracefully, terminating...")
+                 self.search_worker.terminate()
+        # Stop TopicExtractorWorker if running
+        if self.topic_extractor_worker and self.topic_extractor_worker.isRunning():
+             self.log_status("Terminating topic extraction on close...")
+             self.topic_extractor_worker.terminate()
+             self.topic_extractor_worker.wait()
+        # Stop QueryEnhancerWorker if running
+        if self.query_enhancer_worker and self.query_enhancer_worker.isRunning():
+             self.log_status("Terminating query enhancement on close...")
+             self.query_enhancer_worker.terminate()
+             self.query_enhancer_worker.wait()
         # Stop generative fetchers
         if self.gemini_fetcher and self.gemini_fetcher.isRunning():
-             self.gemini_fetcher.terminate() # Or use a more graceful stop if implemented
+             self.log_status("Terminating Gemini fetcher on close...")
+             self.gemini_fetcher.terminate()
              self.gemini_fetcher.wait()
         if self.openrouter_fetcher and self.openrouter_fetcher.isRunning():
+             self.log_status("Terminating OpenRouter fetcher on close...")
              self.openrouter_fetcher.terminate()
              self.openrouter_fetcher.wait()
-        # Removed termination logic for embedding fetchers
-        # if self.gemini_embedding_fetcher and self.gemini_embedding_fetcher.isRunning():
-        #      self.gemini_embedding_fetcher.terminate()
-        #      self.gemini_embedding_fetcher.wait()
-        # if self.openrouter_embedding_fetcher and self.openrouter_embedding_fetcher.isRunning():
-        #      self.openrouter_embedding_fetcher.terminate()
-        #      self.openrouter_embedding_fetcher.wait()
+        # Removed termination for embedding fetchers
         event.accept()

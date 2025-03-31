@@ -22,39 +22,37 @@ def build_final_answer(
     else:
         reference_links_str = "No web reference links found."
 
-    # Construct final prompt
-    progress_callback("Constructing final RAG prompt...")
-    aggregation_prompt = f"""
-You are an expert research analyst. Using all of the data provided below, produce a comprehensive, advanced report of at least 3000 words on the topic.
-The report should include:
-1) A detailed Table of Contents (based on the search branches, if available),
-2) Multiple sections,
-3) In-depth analysis with citations (referencing URLs or local file paths where applicable),
-4) A final reference section listing all relevant URLs.
+    # Retrieve the prompt template content loaded by the worker
+    prompt_template_content = resolved_settings.get('rag_prompt_template_content')
 
-User Query: {enhanced_query}
+    if not prompt_template_content:
+        # This should ideally not happen due to the checks in the worker, but handle defensively
+        progress_callback("[ERROR] Prompt template content missing in resolved_settings. Cannot generate final answer.")
+        return "Error: Could not load prompt template for final report generation."
 
-Table of Contents:
-{toc_str}
+    # Format the loaded template with the gathered data
+    progress_callback("Formatting final RAG prompt...")
+    try:
+        # Ensure all expected keys are present, even if empty, to avoid KeyError on format
+        format_data = {
+            'enhanced_query': enhanced_query or "N/A",
+            'toc_str': toc_str or "N/A",
+            'summarized_web': summarized_web or "N/A",
+            'summarized_local': summarized_local or "N/A",
+            'reference_links_str': reference_links_str or "N/A",
+            # Add any other placeholders your templates might use
+        }
+        final_prompt = prompt_template_content.format(**format_data)
+    except KeyError as e:
+        progress_callback(f"[ERROR] Missing key in prompt template formatting: {e}. Check template file placeholders.")
+        return f"Error: Prompt template formatting failed due to missing key: {e}"
+    except Exception as e:
+        progress_callback(f"[ERROR] An unexpected error occurred during prompt formatting: {e}")
+        return f"Error: Failed to format prompt template: {e}"
 
-Summarized Web Results:
-{summarized_web}
-
-Summarized Local Document Results:
-{summarized_local}
-
-Reference Links (unique URLs found):
-{reference_links_str}
-
-Additionally, incorporate any previously gathered information if available.
-Provide a thorough discussion covering background, current findings, challenges, and future directions.
-Write the report in clear Markdown with section headings, subheadings, and references.
-
-Report:
-"""
     # Use resolved RAG model
     progress_callback(f"Calling final RAG model ({resolved_settings['rag_model']})...")
-    print("[DEBUG] Final RAG prompt constructed. Passing to rag_final_answer()...")
+    print("[DEBUG] Final RAG prompt formatted. Passing to rag_final_answer()...")
     # Assemble llm_config for the final RAG task
     provider = resolved_settings.get('rag_model', 'gemma')
     model_id = resolved_settings.get(f"{provider}_model_id") # e.g., gemini_model_id
@@ -66,7 +64,7 @@ Report:
         "personality": resolved_settings.get('personality')
     }
     final_answer = rag_final_answer(
-        aggregation_prompt,
+        final_prompt, # Pass the formatted prompt content
         llm_config=llm_config_for_rag
         # Consider adding progress_callback to rag_final_answer if it's long
     )

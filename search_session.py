@@ -5,13 +5,14 @@ import uuid
 import asyncio
 import random
 import traceback # For more detailed error logging
+import time # For potential delays
 
 # Import necessary components
-from knowledge_base import KnowledgeBase # embed_text is removed, late_interaction_score unused here
+from knowledge_base import KnowledgeBase # Removed Document import
 from web_search import download_webpages_ddg, parse_html_to_text, group_web_results_by_domain, sanitize_filename
 from aggregator import aggregate_results # Keep for save_report call initially
 # Import specific functions from LLM providers and utils
-from llm_providers.tasks import chain_of_thought_query_enhancement
+from llm_providers.tasks import chain_of_thought_query_enhancement, generate_followup_queries # Added generate_followup_queries
 from llm_providers.utils import clean_search_query
 import toc_tree
 # Import new modules/factories
@@ -51,23 +52,15 @@ class SearchSession:
         self.progress_callback(f"Initializing SearchSession (ID: {self.query_id})...")
         print(f"[INFO] Initializing SearchSession for query_id={self.query_id}")
 
-        # Enhance the query via chain-of-thought using resolved settings
-        self.progress_callback("Enhancing query using chain-of-thought...")
-        # Assemble llm_config for the enhancement task
-        provider = self.resolved_settings.get('rag_model', 'gemma')
-        model_id = self.resolved_settings.get(f"{provider}_model_id") # e.g., gemini_model_id
-        api_key = self.resolved_settings.get(f"{provider}_api_key") # e.g., gemini_api_key
-        llm_config_for_enhancement = {
-            "provider": provider,
-            "model_id": model_id,
-            "api_key": api_key,
-            "personality": self.resolved_settings.get('personality')
-        }
-        self.enhanced_query = chain_of_thought_query_enhancement(
-            self.query,
-            llm_config=llm_config_for_enhancement
-        )
-        self.progress_callback(f"Enhanced Query: {self.enhanced_query}")
+        # --- Query Enhancement Removed from __init__ ---
+        # The query enhancement step is now handled in the GUI before starting the SearchWorker,
+        # allowing for a preview without modifying the original query unless explicitly requested
+        # via the "Extract Text (Keywords)" checkbox.
+        # The SearchSession now receives the query it should use directly.
+        self.enhanced_query = self.query # Use the provided query directly
+        self.progress_callback(f"Using Query: {self.enhanced_query}")
+        # --- End Query Enhancement Removal ---
+
 
         # --- Initialize Embedder ---
         try:
@@ -184,9 +177,116 @@ class SearchSession:
             self.enhanced_query,
             top_k=self.resolved_settings['top_k']
         )
-        self.progress_callback(f"Retrieved {len(self.local_results)} documents from knowledge base.")
+        self.progress_callback(f"Retrieved {len(self.local_results)} initial documents from knowledge base.")
 
-        # 5) Summaries and final RAG generation
+        # --- NEW: Iterative Sub-Query Generation (Agentic Step) ---
+        if self.resolved_settings.get('enable_iterative_search', False) and self.resolved_settings.get('rag_model') != 'None':
+            self.progress_callback("Iterative search enabled. Analyzing initial results...")
+            print("[INFO] Starting iterative sub-query generation step.")
+
+            # a) Prepare Context Summary (Simple concatenation for now)
+            # Combine text from top local results and web results
+            context_texts = [res['metadata']['snippet'] for res in self.local_results[:self.resolved_settings['top_k']] if 'metadata' in res and 'snippet' in res['metadata']]
+            # Add web result text (consider limiting length or number)
+            for web_res in self.web_results[:5]: # Limit web results used for context
+                 if 'text' in web_res and web_res['text']:
+                     context_texts.append(web_res['text'][:1000]) # Limit length per web result
+
+            context_summary_for_llm = "\n\n".join(context_texts).strip()
+
+            if not context_summary_for_llm:
+                self.progress_callback("[WARN] No context found from initial results to generate follow-up queries.")
+            else:
+                # b) Generate Follow-up Queries
+                # Prepare llm_config for the generation task (using RAG model settings)
+                llm_config_for_followup = {
+                    "provider": self.resolved_settings.get('rag_model'),
+                    "model_id": self.resolved_settings.get(f"{self.resolved_settings.get('rag_model')}_model_id"),
+                    "api_key": self.resolved_settings.get(f"{self.resolved_settings.get('rag_model')}_api_key"),
+                    "personality": self.resolved_settings.get('personality')
+                }
+                self.progress_callback("Generating follow-up queries using LLM...")
+                followup_queries = generate_followup_queries(
+                    initial_query=self.enhanced_query,
+                    context_summary=context_summary_for_llm[:8000], # Limit context length for LLM
+                    llm_config=llm_config_for_followup,
+                    max_queries=3 # Limit to 3 follow-up queries
+                )
+
+                if followup_queries:
+                    self.progress_callback(f"Generated {len(followup_queries)} follow-up queries: {', '.join(followup_queries)}")
+                    followup_docs_added = 0
+                    for f_query in followup_queries:
+                        # Check cancellation before each sub-query search
+                        if cancellation_check_callback and cancellation_check_callback():
+                            self.progress_callback("Cancellation requested during follow-up search.")
+                            raise asyncio.CancelledError("Search cancelled by user.")
+
+                        self.progress_callback(f"Executing follow-up search for: '{f_query}'")
+                        try:
+                            # c) Execute Follow-up Queries (Simple DDG search)
+                            # Use a smaller limit for follow-up searches
+                            followup_search_limit = max(1, self.resolved_settings.get('search_max_results', 5) // 2)
+                            followup_results = await download_webpages_ddg(f_query, limit=followup_search_limit)
+                            time.sleep(0.5) # Small delay between DDG calls
+
+                            # d) Parse and Add to KB
+                            for res in followup_results:
+                                if cancellation_check_callback and cancellation_check_callback(): raise asyncio.CancelledError("Search cancelled.")
+                                try:
+                                     # Use 'file_path' key instead of 'body'
+                                     parsed_text = parse_html_to_text(res['file_path'])
+                                     if parsed_text:
+                                         # Embed the parsed text using the session's embedder
+                                         followup_emb = self.embedder.embed(parsed_text)
+                                         if followup_emb is not None:
+                                             # Create the dictionary entry expected by add_documents
+                                             entry = {
+                                                 'embedding': followup_emb.cpu(), # Ensure CPU tensor
+                                                 'metadata': {
+                                                     'source': res.get('href', 'unknown_followup_url'),
+                                                     'query': f_query,
+                                                     'type': 'followup_web',
+                                                     'snippet': parsed_text[:150].replace('\n', ' ').strip() + "..."
+                                                 }
+                                             }
+                                             # Add the single entry (as a list) to the KB
+                                             self.kb.add_documents([entry])
+                                             followup_docs_added += 1
+                                         else:
+                                             self.progress_callback(f"[WARN] Failed to embed follow-up content from: {res.get('href', 'unknown URL')}")
+                                         # Optional: Log added doc source
+                                        # self.progress_callback(f"  Added follow-up content from: {res['href']}")
+                                except Exception as parse_err:
+                                    print(f"[WARN] Failed to parse follow-up result from {res.get('href', 'unknown URL')}: {parse_err}")
+                                    self.progress_callback(f"[WARN] Failed to parse follow-up result: {res.get('href', 'unknown URL')}")
+
+                        except Exception as search_err:
+                            print(f"[ERROR] Failed to execute follow-up search for '{f_query}': {search_err}")
+                            self.progress_callback(f"[ERROR] Failed follow-up search for: '{f_query}'")
+
+                    if followup_docs_added > 0:
+                        self.progress_callback(f"Added {followup_docs_added} documents from follow-up searches to knowledge base.")
+                        # e) Re-run Local Retrieval
+                        self.progress_callback("Re-running local retrieval with updated knowledge base...")
+                        # KB.search uses its internal embedder
+                        self.local_results = self.kb.search(
+                            self.enhanced_query,
+                            top_k=self.resolved_settings['top_k'] # Use the original top_k
+                        )
+                        self.progress_callback(f"Retrieved {len(self.local_results)} documents after follow-up searches.")
+                    else:
+                         self.progress_callback("No new documents added from follow-up searches.")
+
+                else:
+                    self.progress_callback("LLM did not generate any follow-up queries.")
+        else:
+             if self.resolved_settings.get('enable_iterative_search', False):
+                  self.progress_callback("[INFO] Iterative search enabled, but RAG model is 'None'. Skipping follow-up query generation.")
+             # else: # Iterative search not enabled, do nothing extra
+
+
+        # 5) Summaries and final RAG generation (Now uses potentially updated local_results)
         self.progress_callback("Summarizing web results...")
         # Summarization function now returns summary and reference links
         summarized_web, self._reference_links = summarization.summarize_web_results(
