@@ -33,7 +33,7 @@ from config_utils import load_config, save_config # Added save_config
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("NanoSage GUI 🧙")
+        self.setWindowTitle("NanoSage-EG GUI 🧙") # <<< Changed here
         # self.setWindowIcon(QIcon("path/to/icon.png")) # Optional
 
         # Load initial config
@@ -383,6 +383,10 @@ class MainWindow(QMainWindow):
         self.current_report_path = None
         self.current_results_dir = None
 
+        # Show and start indeterminate progress bar
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0) # Indeterminate mode
+
         # --- Call initial visibility handler for search provider ---
         self.handle_search_provider_change(self.search_provider_combo.currentText())
 
@@ -437,6 +441,9 @@ class MainWindow(QMainWindow):
         """Called when the search thread finishes (success or error)."""
         self.run_button.setEnabled(True)
         self.search_worker = None # Allow starting a new search
+        # Hide and reset progress bar
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 100) # Reset range
 
     def open_report(self):
         """Open the generated report file using the default system viewer."""

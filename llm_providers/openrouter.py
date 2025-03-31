@@ -104,7 +104,7 @@ def call_openrouter(prompt, model="openai/gpt-3.5-turbo", personality=None, open
         "Content-Type": "application/json",
         # Recommended headers by OpenRouter
         "HTTP-Referer": "http://localhost", # Replace with your actual app URL if applicable
-        "X-Title": "NanoSage", # Replace with your app name
+        "X-Title": "NanoSage-EG", # Replace with your app name
     }
 
     data = {

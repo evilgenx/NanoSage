@@ -55,7 +55,7 @@ def main():
              # Updated error message
              print("[ERROR] GUI dependencies (PyQt6) are not installed or GUI components (gui/main_window.py) are missing. Cannot launch GUI.")
              sys.exit(1)
-        print("[INFO] Launching NanoSage GUI...")
+        print("[INFO] Launching NanoSage-EG GUI...")
         app = QApplication(sys.argv)
         main_window = MainWindow()
         main_window.show()

@@ -1,14 +1,14 @@
-# NanoSage 🧙: Advanced Recursive Search & Report Generation  
+# NanoSage-EG 🧙: Advanced Recursive Search & Report Generation  
 
 Deep Research assistant that runs on your laptop, using tiny models. - all open source!
 
-## How is NanoSage different than other Assistant Researchers?
+## How is NanoSage-EG different than other Assistant Researchers?
 
 It offers a structured breakdown of a multi-source, relevance-driven, recursive search pipeline. It walks through how the system refines a user query, builds a knowledge base from local and web data, and dynamically explores subqueries—tracking progress through a Table of Contents (TOC).
 
 With Monte Carlo-based exploration, the system balances depth vs. breadth, ranking each branch’s relevance to ensure precision and avoid unrelated tangents. The result? A detailed, well-organized report generated using retrieval-augmented generation (RAG), integrating the most valuable insights.
 
-I wanted to experiment with new research methods, so I thought, basically, when we research a topic, we randomly explore new ideas as we search, and NanoSage basically does that!
+I wanted to experiment with new research methods, so I thought, basically, when we research a topic, we randomly explore new ideas as we search, and NanoSage-EG basically does that!
 It explores and records its journey, where each (relevant) step is a node... and then sums it up to you in a neat report!
 Where the table of content is basically its search graph. 🧙
 
@@ -17,7 +17,7 @@ Where the table of content is basically its search graph. 🧙
 ## Example Report
 
 You can find an example report in the following link:  
-[example report output for query: "Create a structure bouldering gym workout to push my climbing from v4 to v6"](https://github.com/masterFoad/NanoSage/blob/main/example_report.md)
+[example report output for query: "Create a structure bouldering gym workout to push my climbing from v4 to v6"](https://github.com/evilgenx/NanoSage-EG/blob/main/example_report.md) <!-- Assuming example report exists in the new repo -->
 
 ---
 
@@ -54,7 +54,7 @@ pip install --upgrade pyOpenSSL cryptography
 
 ### 1.5. Launch the GUI (Recommended)
 
-NanoSage includes a graphical user interface (GUI) built with PyQt6 for easier interaction.
+NanoSage-EG includes a graphical user interface (GUI) built with PyQt6 for easier interaction.
 
 1.  **Dependencies**: The required `PyQt6` library is included in `requirements.txt` and installed in the previous step.
 2.  **Run the GUI**:
@@ -267,7 +267,7 @@ python main.py --query "Climate change impact on economy" \
 
 ---
 
-## Detailed Design: NanoSage Architecture
+## Detailed Design: NanoSage-EG Architecture
 
 ### 1. Core Input Parameters
 
@@ -394,18 +394,18 @@ main.py:
 ```
 
 
-If you found **NanoSage** useful for your research or project - or saved you 1 minute of googling, please consider citing it:  
+If you found **NanoSage-EG** useful for your research or project - or saved you 1 minute of googling, please consider citing it:  
 
 **BibTeX Citation:**  
 ```bibtex
-@misc{NanoSage,
-  author = {Foad Abo Dahood}, 
-  title = {NanoSage: A Recursive, Relevance-Driven Search and RAG Pipeline},
+@misc{NanoSage-EG,
+  author = {Foad Abo Dahood, evilgenx}, 
+  title = {NanoSage-EG: A Recursive, Relevance-Driven Search and RAG Pipeline},
   year = {2025},
-  howpublished = {\url{https://github.com/masterFoad/NanoSage}},
+  howpublished = {\url{https://github.com/evilgenx/NanoSage-EG}},
   note = {Accessed: \today}
 }
 ```
 
 **APA Citation:**  
-Foad, Abo Dahood. (2025). *NanoSage: A Recursive, Relevance-Driven Search and RAG Pipeline*. Retrieved from [https://github.com/masterFoad/NanoSage](https://github.com/masterFoad/NanoSage)
+Foad, Abo Dahood & evilgenx. (2025). *NanoSage-EG: A Recursive, Relevance-Driven Search and RAG Pipeline*. Retrieved from [https://github.com/evilgenx/NanoSage-EG](https://github.com/evilgenx/NanoSage-EG)

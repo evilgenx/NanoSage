@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox,
     QCheckBox, QGroupBox, QFormLayout, QScrollArea, # Added QScrollArea
-    QSizePolicy
+    QSizePolicy, QProgressBar # Added QProgressBar
 )
 # Note: MainWindow itself is passed in, so we don't import it directly
 # Note: QFileDialog, QMessageBox, QMainWindow are used in MainWindow logic, not setup
@@ -152,6 +152,14 @@ def setup_main_window_ui(main_window):
     main_window.run_button = QPushButton("Run Search")
     main_window.run_button.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; padding: 10px; border-radius: 5px; } QPushButton:hover { background-color: #45a049; } QPushButton:disabled { background-color: #cccccc; }")
     left_layout.addWidget(main_window.run_button)
+
+    # Add Progress Bar
+    main_window.progress_bar = QProgressBar()
+    main_window.progress_bar.setVisible(False) # Initially hidden
+    main_window.progress_bar.setRange(0, 100) # Default range, will be set to 0,0 for indeterminate
+    main_window.progress_bar.setTextVisible(False) # Hide percentage text
+    left_layout.addWidget(main_window.progress_bar)
+
 
     left_layout.addStretch() # Push elements to the top
 
