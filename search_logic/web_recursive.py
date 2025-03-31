@@ -64,26 +64,28 @@ async def perform_recursive_web_searches(
 
         # --- Select and call the appropriate web search function ---
         search_provider = resolved_settings.get('search_provider', 'duckduckgo')
-        search_limit = resolved_settings.get('search_max_results', 5) # Use the resolved limit
+        # search_limit is now read inside download_webpages_searxng from config
         pages = []
 
         if search_provider == 'searxng':
-            searxng_url = resolved_settings.get('searxng_url')
-            if searxng_url:
+            # Check if base_url exists in config before calling
+            if config.get('search', {}).get('searxng', {}).get('base_url'):
                 pages = await download_webpages_searxng(
                     keyword=sq_clean,
-                    limit=search_limit,
-                    base_url=searxng_url,
+                    config=config, # Pass the whole config object
                     output_dir=subquery_dir,
                     progress_callback=progress_callback
+                    # pageno defaults to 1 if not specified
                 )
             else:
-                progress_callback("[WARN] SearXNG provider selected but URL not found in settings. Skipping web search for this branch.")
-                print("[WARN] SearXNG provider selected but URL not found in resolved_settings.")
+                progress_callback("[WARN] SearXNG provider selected but base_url not found in config. Skipping web search for this branch.")
+                print("[WARN] SearXNG provider selected but base_url not found in config.")
         elif search_provider == 'duckduckgo':
+             # DDG still uses limit argument directly
+             search_limit = resolved_settings.get('search_max_results', 5)
              pages = await download_webpages_ddg(
                  keyword=sq_clean,
-                 limit=search_limit,
+                 limit=search_limit, # Pass limit here
                  output_dir=subquery_dir,
                  progress_callback=progress_callback
              )

@@ -12,7 +12,7 @@ try:
     # Import from the new provider modules
     from llm_providers.gemini import list_gemini_models # Removed list_gemini_embedding_models
     from llm_providers.openrouter import list_openrouter_models # Removed list_openrouter_embedding_models
-    from config_utils import load_config
+    from config_utils import load_config, save_config # Added save_config
 except ImportError as e:
     # This error might be better handled by the main application window
     # or logged, rather than exiting here.
@@ -80,8 +80,12 @@ class SearchWorker(QThread):
                 'openrouter_api_key': config.get('api_keys', {}).get('openrouter_api_key') or os.getenv("OPENROUTER_API_KEY"),
                 # Add search provider settings passed from MainWindow
                 'search_provider': self.params.get("search_provider", "duckduckgo"),
-                'search_max_results': self.params.get("search_limit", 5),
-                'searxng_url': self.params.get("searxng_url"), # Will be None if not SearXNG
+                'search_max_results': self.params.get("search_limit", 5), # Used by DDG directly
+                'searxng_url': self.params.get("searxng_url"),
+                # Add the other SearXNG params passed from MainWindow
+                'searxng_time_range': self.params.get("searxng_time_range"),
+                'searxng_categories': self.params.get("searxng_categories"),
+                'searxng_engines': self.params.get("searxng_engines"),
             }
 
             # --- Instantiate SearchSession correctly ---

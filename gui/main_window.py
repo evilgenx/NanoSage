@@ -5,13 +5,14 @@ import sys
 import os
 import subprocess # To open files/folders
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTextEdit, QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox,
-    QCheckBox, QFileDialog, QMessageBox, QGroupBox, QFormLayout,
-    QSizePolicy
+    QMainWindow, QTextEdit, QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox,
+    QCheckBox, QFileDialog, QMessageBox # Removed unused layout/widget imports
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon # Optional: for window icon
+# from PyQt6.QtCore import Qt # Removed unused Qt
+# from PyQt6.QtGui import QIcon # Optional: for window icon
+
+# Import the new UI setup function
+from .ui_setup import setup_main_window_ui
 
 # Import worker threads using relative import
 try:
@@ -49,187 +50,47 @@ class MainWindow(QMainWindow):
         self.current_report_path = None
         self.current_results_dir = None
 
-        self._init_ui()
-        self._connect_signals()
+        # Call the UI setup function from the separate module
+        setup_main_window_ui(self)
 
-    def _init_ui(self):
-        """Initialize UI elements."""
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QHBoxLayout(central_widget)
-
-        # --- Left Panel: Configuration ---
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-
-        # Query Input
-        query_group = QGroupBox("Search Query")
-        query_layout = QVBoxLayout()
-        self.query_input = QTextEdit()
-        self.query_input.setPlaceholderText("Enter your research query here...")
-        query_layout.addWidget(self.query_input)
-        query_group.setLayout(query_layout)
-        left_layout.addWidget(query_group)
-
-        # Configuration Options
-        config_group = QGroupBox("Configuration")
-        config_layout = QFormLayout()
-
-        self.web_search_checkbox = QCheckBox("Enable Web Search")
-        config_layout.addRow(self.web_search_checkbox)
-
-        corpus_layout = QHBoxLayout()
-        self.corpus_dir_label = QLineEdit()
-        self.corpus_dir_label.setPlaceholderText("Optional: Path to local documents")
-        self.corpus_dir_label.setReadOnly(True)
-        self.corpus_dir_button = QPushButton("Browse...")
-        corpus_layout.addWidget(self.corpus_dir_label)
-        corpus_layout.addWidget(self.corpus_dir_button)
-        config_layout.addRow("Local Corpus:", corpus_layout)
-
-        self.max_depth_spinbox = QSpinBox()
-        self.max_depth_spinbox.setRange(0, 10)
-        self.max_depth_spinbox.setValue(1)
-        config_layout.addRow("Max Recursion Depth:", self.max_depth_spinbox)
-
-        self.top_k_spinbox = QSpinBox()
-        self.top_k_spinbox.setRange(1, 50)
-        self.top_k_spinbox.setValue(3)
-        config_layout.addRow("Top K Results:", self.top_k_spinbox) # Renamed label slightly
-
-        # --- Search Provider Configuration ---
-        search_group = QGroupBox("Search Settings")
-        search_layout = QFormLayout()
-        self.search_provider_combo = QComboBox()
-        self.search_provider_combo.addItems(["DuckDuckGo", "SearXNG"])
-        # Set initial value from loaded config
+        # --- Set initial UI states based on loaded config ---
+        # Search Provider
         default_provider = self.config_data.get('search', {}).get('provider', 'duckduckgo')
         provider_index = 0 if default_provider == 'duckduckgo' else 1
         self.search_provider_combo.setCurrentIndex(provider_index)
-        search_layout.addRow("Search Provider:", self.search_provider_combo)
-        # Add more search settings here if needed (e.g., max results, SearXNG URL input)
-        search_group.setLayout(search_layout)
-        config_layout.addRow(search_group) # Add search group to main config layout
 
+        # SearXNG Fields (values loaded from config)
+        searxng_config = self.config_data.get('search', {}).get('searxng', {})
+        self.searxng_base_url_input.setText(searxng_config.get('base_url', ''))
+        self.searxng_time_range_input.setText(searxng_config.get('time_range', ''))
+        self.searxng_categories_input.setText(searxng_config.get('categories', ''))
+        self.searxng_engines_input.setText(searxng_config.get('engines', ''))
 
-        # --- Embedding Configuration ---
-        embedding_group = QGroupBox("Embedding Settings")
-        embedding_layout = QFormLayout()
+        # Initial visibility based on selected provider (call handler)
+        self.handle_search_provider_change(self.search_provider_combo.currentText())
 
-        self.device_combo = QComboBox()
-        # Add new API device options
-        self.device_combo.addItems(["cpu", "cuda"])
-        embedding_layout.addRow("Embedding Device:", self.device_combo)
+        # Initial embedding device/model state (call handler)
+        # Assuming default device is 'cpu' if not specified in config (or handle config loading)
+        default_embedding_device = self.config_data.get('embeddings', {}).get('device', 'cpu') # Example config structure
+        self.device_combo.setCurrentText(default_embedding_device) # Set combo
+        self.handle_device_change(default_embedding_device) # Trigger model list update
 
-        # Renamed combo box for clarity
-        self.embedding_model_combo = QComboBox()
-        # Initially populate based on default device ('cpu')
-        self.embedding_model_combo.addItems(["colpali", "all-minilm"])
-        self.embedding_model_label = QLabel("Embedding Model:") # Label for the combo
-        embedding_layout.addRow(self.embedding_model_label, self.embedding_model_combo)
+        # Initial RAG model state (call handler)
+        default_rag_model = self.config_data.get('rag', {}).get('model', 'None') # Example config structure
+        self.rag_model_combo.setCurrentText(default_rag_model)
+        self.handle_rag_model_change(default_rag_model) # Trigger visibility updates
 
-        # Removed fetch buttons for Gemini/OpenRouter embedding models
-        # self.gemini_embedding_fetch_button = QPushButton("Fetch Gemini Embed Models")
-        # self.openrouter_embedding_fetch_button = QPushButton("Fetch OpenRouter Embed Models")
-        # self.gemini_embedding_fetch_button.setVisible(False)
-        # self.openrouter_embedding_fetch_button.setVisible(False)
-        # embedding_layout.addRow(self.gemini_embedding_fetch_button)
-        # embedding_layout.addRow(self.openrouter_embedding_fetch_button)
+        # Set other config-dependent initial states if any (e.g., checkbox, spinboxes)
+        self.web_search_checkbox.setChecked(self.config_data.get('search', {}).get('web_search_enabled', True)) # Example
+        self.max_depth_spinbox.setValue(self.config_data.get('search', {}).get('max_depth', 1))
+        self.top_k_spinbox.setValue(self.config_data.get('search', {}).get('top_k', 3))
+        self.corpus_dir_label.setText(self.config_data.get('corpus', {}).get('path', '')) # Example
+        self.personality_input.setText(self.config_data.get('rag', {}).get('personality', ''))
 
-        embedding_group.setLayout(embedding_layout)
-        config_layout.addRow(embedding_group) # Add embedding group to main config layout
+        # Connect signals after UI is fully set up and initialized
+        self._connect_signals()
 
-        # --- RAG Configuration ---
-        rag_group = QGroupBox("RAG Settings")
-        rag_layout = QFormLayout()
-
-        self.rag_model_combo = QComboBox()
-        self.rag_model_combo.addItems(["gemma", "pali", "gemini", "openrouter", "None"])
-        rag_layout.addRow("RAG Model Type:", self.rag_model_combo)
-
-        # Gemini RAG Specific - initially hidden
-        self.gemini_fetch_button = QPushButton("Fetch Gemini Gen Models") # Renamed button
-        self.gemini_model_combo = QComboBox()
-        self.gemini_fetch_button.setVisible(False)
-        self.gemini_model_combo.setVisible(False)
-        self.gemini_model_label = QLabel("Select Gemini Gen Model:") # Renamed label
-        self.gemini_model_label.setVisible(False)
-        rag_layout.addRow(self.gemini_fetch_button)
-        rag_layout.addRow(self.gemini_model_label, self.gemini_model_combo)
-
-        # OpenRouter RAG Specific - initially hidden
-        self.openrouter_fetch_button = QPushButton("Fetch Free Gen Models") # Renamed button
-        self.openrouter_model_combo = QComboBox()
-        self.openrouter_fetch_button.setVisible(False)
-        self.openrouter_model_combo.setVisible(False)
-        self.openrouter_model_label = QLabel("Select OpenRouter Gen Model:") # Renamed label
-        self.openrouter_model_label.setVisible(False)
-        rag_layout.addRow(self.openrouter_fetch_button)
-        rag_layout.addRow(self.openrouter_model_label, self.openrouter_model_combo)
-
-        self.personality_input = QLineEdit()
-        self.personality_input.setPlaceholderText("Optional: e.g., 'scientific', 'cheerful'")
-        self.personality_label = QLabel("RAG Personality:")
-        rag_layout.addRow(self.personality_label, self.personality_input)
-        # Initially hide personality if RAG is None
-        self.personality_label.setVisible(self.rag_model_combo.currentText() != "None")
-        self.personality_input.setVisible(self.rag_model_combo.currentText() != "None")
-
-        rag_group.setLayout(rag_layout)
-        config_layout.addRow(rag_group) # Add RAG group to main config layout
-
-        config_group.setLayout(config_layout)
-        left_layout.addWidget(config_group)
-
-
-        # Execution Button
-        self.run_button = QPushButton("Run Search")
-        self.run_button.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; padding: 10px; border-radius: 5px; } QPushButton:hover { background-color: #45a049; } QPushButton:disabled { background-color: #cccccc; }")
-        left_layout.addWidget(self.run_button)
-
-        left_layout.addStretch() # Push elements to the top
-
-        # --- Right Panel: Status & Results ---
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-
-        # Status Log
-        status_group = QGroupBox("Status Log")
-        status_layout = QVBoxLayout()
-        self.status_log = QTextEdit()
-        self.status_log.setReadOnly(True)
-        self.status_log.setPlaceholderText("Search progress will appear here...")
-        status_layout.addWidget(self.status_log)
-        status_group.setLayout(status_layout)
-        right_layout.addWidget(status_group)
-
-
-        # Results
-        results_group = QGroupBox("Results")
-        results_layout = QFormLayout() # Use FormLayout for label-button pairs
-        self.report_path_label = QLabel("Report will appear here.")
-        self.report_path_label.setWordWrap(True)
-        self.open_report_button = QPushButton("Open Report")
-        self.open_folder_button = QPushButton("Open Results Folder")
-        self.open_report_button.setEnabled(False)
-        self.open_folder_button.setEnabled(False)
-
-        results_layout.addRow("Report Path:", self.report_path_label)
-        button_layout = QHBoxLayout() # Layout for buttons side-by-side
-        button_layout.addWidget(self.open_report_button)
-        button_layout.addWidget(self.open_folder_button)
-        results_layout.addRow(button_layout) # Add the button layout as a row
-
-        results_group.setLayout(results_layout)
-        right_layout.addWidget(results_group)
-
-        # Add panels to main layout
-        main_layout.addWidget(left_panel, 1) # Give left panel less stretch factor
-        main_layout.addWidget(right_panel, 2) # Give right panel more stretch factor
-
+    # _init_ui method is now removed
 
     def _connect_signals(self):
         """Connect UI signals to slots."""
@@ -248,10 +109,22 @@ class MainWindow(QMainWindow):
         # Connect result buttons
         self.open_report_button.clicked.connect(self.open_report)
         self.open_folder_button.clicked.connect(self.open_results_folder)
-        # Connect search provider change signal (optional: for saving config immediately)
-        # self.search_provider_combo.currentTextChanged.connect(self.handle_search_provider_change)
+        # Connect search provider change signal to show/hide SearXNG options
+        self.search_provider_combo.currentTextChanged.connect(self.handle_search_provider_change)
 
     # --- Slot Methods ---
+
+    def handle_search_provider_change(self, provider_text):
+        """Show/hide SearXNG specific settings."""
+        is_searxng = (provider_text == "SearXNG")
+        self.searxng_base_url_label.setVisible(is_searxng)
+        self.searxng_base_url_input.setVisible(is_searxng)
+        self.searxng_time_range_label.setVisible(is_searxng)
+        self.searxng_time_range_input.setVisible(is_searxng)
+        self.searxng_categories_label.setVisible(is_searxng)
+        self.searxng_categories_input.setVisible(is_searxng)
+        self.searxng_engines_label.setVisible(is_searxng)
+        self.searxng_engines_input.setVisible(is_searxng)
 
     def handle_device_change(self, device_name):
         """Handles changes in the Embedding Device selection."""
@@ -428,15 +301,55 @@ class MainWindow(QMainWindow):
         search_provider_key = 'duckduckgo' if selected_provider_text == "DuckDuckGo" else 'searxng'
 
         # Get provider-specific settings from loaded config
-        search_config = self.config_data.get('search', {})
-        provider_config = search_config.get(search_provider_key, {})
-        search_limit = provider_config.get('max_results', 5) # Default to 5 if not found
-        searxng_url = search_config.get('searxng', {}).get('base_url') if search_provider_key == 'searxng' else None
+        # --- Save Current Config & Prepare Search Provider Parameters ---
+        search_config = self.config_data.setdefault('search', {}) # Ensure 'search' key exists
+        search_config['provider'] = search_provider_key # Save selected provider
 
-        # Optional: Save the selected provider back to config immediately
-        # self.save_current_config() # Uncomment if you want immediate saving
+        searxng_config = search_config.setdefault('searxng', {}) # Ensure 'searxng' key exists
+        ddg_config = search_config.setdefault('duckduckgo', {}) # Ensure 'duckduckgo' key exists
 
-        # --- Prepare All Parameters ---
+        search_limit = 5 # Default limit
+        searxng_url = None
+        searxng_time_range = None
+        searxng_categories = None
+        searxng_engines = None
+
+        if search_provider_key == 'searxng':
+            # Read from GUI and update config_data
+            searxng_url = self.searxng_base_url_input.text().strip() or None
+            searxng_time_range = self.searxng_time_range_input.text().strip() or None
+            searxng_categories = self.searxng_categories_input.text().strip() or None
+            searxng_engines = self.searxng_engines_input.text().strip() or None
+
+            searxng_config['base_url'] = searxng_url
+            searxng_config['time_range'] = searxng_time_range
+            searxng_config['categories'] = searxng_categories
+            searxng_config['engines'] = searxng_engines
+            # Note: max_results for searxng is read inside download_webpages_searxng
+
+            # Try saving the updated config
+            if save_config(self.config_path, self.config_data):
+                self.log_status(f"SearXNG settings saved to {self.config_path}")
+            else:
+                self.log_status(f"[ERROR] Failed to save configuration to {self.config_path}")
+                QMessageBox.warning(self, "Config Error", f"Could not save settings to {self.config_path}")
+                # Decide if you want to proceed without saving or stop
+                # return # Uncomment to stop if saving fails
+
+            # Use the limit from the config for searxng (read internally by worker)
+            search_limit = searxng_config.get('max_results', 5)
+
+        elif search_provider_key == 'duckduckgo':
+            # Use the limit from the config for duckduckgo
+            search_limit = ddg_config.get('max_results', 5)
+            # Try saving the updated config (only provider changed)
+            if save_config(self.config_path, self.config_data):
+                 self.log_status(f"Search provider saved to {self.config_path}")
+            else:
+                 self.log_status(f"[ERROR] Failed to save configuration to {self.config_path}")
+
+
+        # --- Prepare All Parameters for Worker ---
         params = {
             "query": query,
             "corpus_dir": self.corpus_dir_label.text() or None,
@@ -451,9 +364,13 @@ class MainWindow(QMainWindow):
             "selected_openrouter_model": selected_generative_openrouter, # Specific generative model
             # Add resolved search settings
             "search_provider": search_provider_key,
-            "search_limit": search_limit,
-            "searxng_url": searxng_url
-            # config_path could be added if needed
+            "search_limit": search_limit, # Pass the resolved limit for DDG
+            # Pass SearXNG specific params read from GUI (worker will use config, but pass for clarity/potential override)
+            "searxng_url": searxng_url,
+            "searxng_time_range": searxng_time_range,
+            "searxng_categories": searxng_categories,
+            "searxng_engines": searxng_engines,
+            "config_path": self.config_path # Pass config path so worker can reload fresh config
         }
 
         # --- Start Worker ---
@@ -465,6 +382,9 @@ class MainWindow(QMainWindow):
         self.report_path_label.setText("Running...")
         self.current_report_path = None
         self.current_results_dir = None
+
+        # --- Call initial visibility handler for search provider ---
+        self.handle_search_provider_change(self.search_provider_combo.currentText())
 
 
         self.search_worker = SearchWorker(params, self)

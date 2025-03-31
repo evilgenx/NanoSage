@@ -1,13 +1,15 @@
 import os
 import os
 import asyncio
-from urllib.parse import urlparse, quote_plus # Added quote_plus
+from urllib.parse import urlparse, quote_plus, urlencode # Added urlencode
 import aiohttp
 from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 import fitz  # PyMuPDF
-import json # Added json import
-from langchain_community.utilities import SearxSearchWrapper # Added LangChain import
+import json
+
+# Removed LangChain import as we'll call the API directly
+# from langchain_community.utilities import SearxSearchWrapper
 
 def sanitize_filename(filename):
     """Sanitize a filename by allowing only alphanumerics, dot, underscore, and dash."""
@@ -99,13 +101,31 @@ async def download_webpages_ddg(keyword, limit=5, output_dir='downloaded_webpage
                 results_info.append(page)
     return results_info
 
-async def download_webpages_searxng(keyword, limit=5, base_url="http://127.0.0.1:8080", output_dir='downloaded_webpages', progress_callback=None):
+async def download_webpages_searxng(
+    keyword,
+    config, # Accept the full config dictionary
+    output_dir='downloaded_webpages',
+    progress_callback=None,
+    pageno=1 # Keep pageno as it's query-specific
+):
     """
-    Perform a SearXNG search and download pages asynchronously.
+    Perform a SearXNG search using its API directly and download pages asynchronously.
+    Supports additional parameters like language, time_range, safesearch, etc., read from config.
     Returns a list of dicts with 'url', 'file_path', and optionally 'content_type'.
     """
+    # --- Extract SearXNG settings from config ---
+    searxng_config = config.get('search', {}).get('searxng', {})
+    base_url = searxng_config.get('base_url')
+    limit = searxng_config.get('max_results', 5) # Get limit from config
+    language = searxng_config.get('language')
+    safesearch = searxng_config.get('safesearch') # Can be None or 0, 1, 2
+    time_range = searxng_config.get('time_range')
+    categories = searxng_config.get('categories')
+    engines = searxng_config.get('engines')
+    # api_key = searxng_config.get('api_key') # If you needed API key auth
+
     if not base_url:
-        print("[ERROR] SearXNG base_url is not configured.")
+        print("[ERROR] SearXNG base_url is not configured in config.yaml.")
         if progress_callback:
             progress_callback("[ERROR] SearXNG base_url is not configured.")
         return []
@@ -119,68 +139,121 @@ async def download_webpages_searxng(keyword, limit=5, base_url="http://127.0.0.1
         print("[WARN] Empty keyword provided to SearXNG search; skipping search.")
         return []
 
-    # Construct the SearXNG query URL
-    encoded_query = quote_plus(keyword)
-    search_url = f"{base_url.rstrip('/')}/search?q={encoded_query}&format=json"
-    print(f"[INFO] Querying SearXNG via LangChain wrapper: {base_url}")
+    # --- Direct API Call Implementation ---
+    params = {
+        'q': keyword,
+        'format': 'json',
+        'pageno': pageno,
+    }
+    # Add optional parameters if they are provided and not None/empty
+    if language:
+        params['language'] = language
+    if time_range:
+        params['time_range'] = time_range
+    if safesearch is not None: # Check for None explicitly as 0 is a valid value
+        params['safesearch'] = safesearch
+    if categories:
+        params['categories'] = categories
+    if engines:
+        params['engines'] = engines
+    # Note: 'limit' is not a direct SearXNG API param for the query itself,
+    # but we'll use it later to limit the number of downloads.
+    # SearXNG might return more results than 'limit' based on its internal pagination.
+
+    query_string = urlencode(params, quote_via=quote_plus)
+    search_url = f"{base_url.rstrip('/')}/search?{query_string}"
+
+    print(f"[INFO] Querying SearXNG API: {search_url}")
     if progress_callback:
-        progress_callback(f"Querying SearXNG (LangChain) for: '{keyword[:50]}...'")
+        progress_callback(f"Querying SearXNG API for: '{keyword[:50]}...' (Page {pageno})")
 
+    search_results_list = []
     try:
-        # Use LangChain wrapper to get search results list
-        wrapper = SearxSearchWrapper(searx_host=base_url)
-        # Note: The wrapper runs synchronously. Consider running in an executor if performance becomes an issue.
-        # The .results() method returns more info like title and snippet if needed later.
-        searx_results_list = wrapper.results(keyword, num_results=limit)
-
-        if not searx_results_list:
-            print(f"[WARN] No results found via SearXNG wrapper for '{keyword}'. Host: {base_url}")
-            if progress_callback:
-                progress_callback(f"[WARN] No SearXNG results for: '{keyword[:50]}...'")
-            return []
-
-        # Now, asynchronously download the content of the found URLs
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        timeout = aiohttp.ClientTimeout(total=10) # Keep timeout for downloads
+        timeout = aiohttp.ClientTimeout(total=15) # Slightly longer timeout for API query
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            tasks = []
-            count = 0
-            for result in searx_results_list:
-                # The wrapper returns 'link' for the URL
-                url = result.get("link")
-                if not url:
-                    print(f"[WARN] SearXNG wrapper result missing 'link': {result}")
-                    continue
+            async with session.get(search_url, headers={'Accept': 'application/json'}) as response:
+                response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+                data = await response.json()
 
-                # Determine file extension from URL (same logic as before)
-                ext = ".html"
-                if ".pdf" in url.lower():
-                    ext = ".pdf"
-                short_keyword = sanitize_filename(keyword)[:50]
-                filename = f"{short_keyword}_{count}{ext}"
-                file_path = os.path.join(output_dir, filename)
+                # Extract results - adjust keys based on actual SearXNG JSON response structure
+                # Common keys are 'results', 'answers', 'infoboxes'. We primarily want 'results'.
+                if 'results' in data and isinstance(data['results'], list):
+                    search_results_list = data['results']
+                else:
+                    print(f"[WARN] SearXNG JSON response missing 'results' list or not a list. URL: {search_url}")
+                    print(f"[DEBUG] Response data: {data}") # Log the structure for debugging
 
-                # Pass progress_callback to download_page
-                tasks.append(download_page(session, url, headers, timeout, file_path, progress_callback))
-                count += 1 # Increment count based on successfully processed results
+                if not search_results_list:
+                    print(f"[WARN] No results found via SearXNG API for '{keyword}'. URL: {search_url}")
+                    if progress_callback:
+                        progress_callback(f"[WARN] No SearXNG results for: '{keyword[:50]}...' (Page {pageno})")
+                    return []
 
-            pages = await asyncio.gather(*tasks)
-            for page in pages:
-                if page:
-                    results_info.append(page)
-
-    # Catch potential errors from the SearxSearchWrapper or aiohttp downloads
-    except ImportError:
-         error_message = "LangChain community package not found. Please install it: pip install langchain-community"
-         print(f"[ERROR] {error_message}")
-         if progress_callback:
-             progress_callback(f"[ERROR] {error_message}")
-    except Exception as e:
-        # Catch errors from wrapper (e.g., connection issues) or download phase
-        error_message = f"Error during SearXNG search/download for '{keyword}': {e}"
+    except aiohttp.ClientError as e:
+        error_message = f"Network error querying SearXNG API '{search_url}': {e}"
         print(f"[ERROR] {error_message}")
         if progress_callback:
-            progress_callback(f"[ERROR] {error_message}")
+            progress_callback(f"[ERROR] Network error querying SearXNG.")
+        return []
+    except json.JSONDecodeError as e:
+        error_message = f"Error decoding JSON response from SearXNG API '{search_url}': {e}"
+        print(f"[ERROR] {error_message}")
+        if progress_callback:
+            progress_callback(f"[ERROR] Invalid JSON from SearXNG.")
+        return []
+    except Exception as e:
+        # Catch other potential errors (e.g., connection issues, unexpected response structure)
+        error_message = f"Error during SearXNG API query for '{keyword}': {e}"
+        print(f"[ERROR] {error_message}")
+        if progress_callback:
+            progress_callback(f"[ERROR] SearXNG query failed.")
+        return []
+
+    # --- Download Content of Found URLs ---
+    if not search_results_list:
+        return [] # Return early if API query failed or yielded no results
+
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    download_timeout = aiohttp.ClientTimeout(total=10) # Keep original timeout for downloads
+    async with aiohttp.ClientSession(timeout=download_timeout) as session:
+        tasks = []
+        count = 0
+        # Iterate through results up to the specified limit
+        for result in search_results_list:
+            if count >= limit:
+                break # Stop processing once we reach the desired number of downloads
+
+            # Extract URL - common keys are 'url', 'link'. Prioritize 'url'.
+            url = result.get("url") or result.get("link")
+            if not url:
+                print(f"[WARN] SearXNG result missing 'url' or 'link': {result}")
+                continue
+
+            # Determine file extension from URL
+            ext = ".html"
+            parsed_url = urlparse(url)
+            if parsed_url.path.lower().endswith('.pdf'):
+                ext = ".pdf"
+            # Consider other potential file types if needed (e.g., .txt, .docx)
+
+            short_keyword = sanitize_filename(keyword)[:50]
+            # Include page number in filename if not page 1 to avoid overwrites
+            page_suffix = f"_p{pageno}" if pageno > 1 else ""
+            filename = f"{short_keyword}{page_suffix}_{count}{ext}"
+            file_path = os.path.join(output_dir, filename)
+
+            # Pass progress_callback to download_page
+            tasks.append(download_page(session, url, headers, download_timeout, file_path, progress_callback))
+            count += 1 # Increment count based on successfully processed results with a URL
+
+        if not tasks:
+            print("[INFO] No valid URLs found in SearXNG results to download.")
+            return []
+
+        pages = await asyncio.gather(*tasks)
+        for page in pages:
+            if page:
+                results_info.append(page)
 
     return results_info
 
