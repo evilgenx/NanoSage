@@ -1,0 +1,87 @@
+# NanoSage Configuration Example
+# Copy this file to config.yaml and fill in your details, especially API keys.
+
+general:
+  # Directory to store downloaded webpages and other corpus data.
+  # Leave as null to use a default temporary directory.
+  corpus_dir: null
+  # Device to run models on ('cpu', 'cuda', 'mps', etc.). 'cpu' is generally safest.
+  device: cpu
+  # Maximum depth for recursive web searches. 1 means only search initial results.
+  max_depth: 1
+  # Enable or disable web search functionality.
+  web_search: true
+
+retrieval:
+  # Model used for embedding and retrieval. 'colpali' is a local option.
+  retrieval_model: colpali
+  # Number of relevant document chunks to retrieve for the LLM context.
+  top_k: 3
+
+llm:
+  # Default LLM provider to use for generation tasks ('gemma', 'gemini', 'openrouter', 'ollama').
+  rag_model: gemma
+  # Personality prompt for the LLM.
+  personality: cheerful assistant
+  # Specific model ID for the local Gemma provider.
+  gemma_model_id: gemma2:2b
+  # Specific model ID for the Google Gemini provider. Requires gemini_api_key.
+  gemini_model_id: models/gemini-1.5-flash-latest
+  # Specific model ID for the OpenRouter provider. Requires openrouter_api_key.
+  openrouter_model_id: openai/gpt-3.5-turbo
+  # Mapping of output format names to prompt file paths.
+  output_formats:
+    Report: prompts/report.prompt
+    Guide: prompts/guide.prompt
+    Summary: prompts/summary.prompt
+    Blog Post: prompts/blog_post.prompt
+    Executive Summary: prompts/executive_summary.prompt
+    Action Plan: prompts/action_plan.prompt
+    Key Findings: prompts/key_findings.prompt
+    Checklist: prompts/checklist.prompt
+    Email Draft: prompts/email_draft.prompt
+    FAQ: prompts/faq.prompt
+    Presentation Outline: prompts/presentation_outline.prompt
+    Pros & Cons: prompts/pros_cons.prompt
+    SWOT Analysis: prompts/swot_analysis.prompt
+
+search:
+  # Search provider ('searxng', 'duckduckgo').
+  provider: searxng
+  # Enable iterative search (sub-queries based on initial results).
+  enable_iterative_search: false
+  duckduckgo:
+    # Max results for DuckDuckGo.
+    max_results: 5
+  searxng:
+    # Base URL of your SearXNG instance.
+    base_url: http://127.0.0.1:8080 # Default local instance URL
+    # Max results per SearXNG query.
+    max_results: 5
+    # Language filter (e.g., 'en').
+    language: en
+    # Safesearch level (0: none, 1: moderate, 2: strict).
+    safesearch: 1
+    # Time range filter (e.g., 'day', 'week', 'month', 'year'). null for none.
+    time_range: null
+    # Categories filter (e.g., 'general', 'news'). null for none.
+    categories: null
+    # List of enabled SearXNG engines. Refer to your instance's settings.
+    # This is a sample list, adjust based on your SearXNG instance configuration.
+    engines:
+    - bing
+    - brave
+    - duckduckgo
+    - google
+    - mojeek
+    - qwant
+    - startpage
+    - wikipedia
+    - yep
+
+api_keys:
+  # Get your Gemini API key from Google AI Studio: https://aistudio.google.com/app/apikey
+  gemini_api_key: YOUR_GEMINI_API_KEY_HERE
+  # Get your OpenRouter API key from: https://openrouter.ai/keys
+  openrouter_api_key: YOUR_OPENROUTER_API_KEY_HERE
+  # Add other API keys here if needed for different LLM or search providers.
