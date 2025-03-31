@@ -26,7 +26,10 @@ except ImportError as e:
     sys.exit(1)
 
 # Import config loading utility
-from config_utils import load_config, save_config # Added save_config
+from config_utils import load_config, save_config
+
+# Import the selector widget (though it's created in ui_setup, we need its type potentially)
+# from .ui_components.searxng_selector import SearxngEngineSelector # Not strictly needed here if only interacting via ui_setup attributes
 
 # --- Main Window ---
 
@@ -62,9 +65,16 @@ class MainWindow(QMainWindow):
         # SearXNG Fields (values loaded from config)
         searxng_config = self.config_data.get('search', {}).get('searxng', {})
         self.searxng_base_url_input.setText(searxng_config.get('base_url', ''))
-        self.searxng_time_range_input.setText(searxng_config.get('time_range', ''))
-        self.searxng_categories_input.setText(searxng_config.get('categories', ''))
-        self.searxng_engines_input.setText(searxng_config.get('engines', ''))
+        self.searxng_time_range_input.setText(searxng_config.get('time_range', '') or '') # Ensure string for setText
+        self.searxng_categories_input.setText(searxng_config.get('categories', '') or '') # Ensure string for setText
+        # self.searxng_engines_input.setText(searxng_config.get('engines', '')) # Removed old input
+
+        # Set initial state of the SearxngEngineSelector
+        initial_engines = searxng_config.get('engines', [])
+        # Ensure it's a list, handle potential None or non-list values from config
+        if not isinstance(initial_engines, list):
+            initial_engines = [] # Default to empty list if config value is invalid
+        self.searxng_engine_selector.setSelectedEngines(initial_engines)
 
         # Initial visibility based on selected provider (call handler)
         self.handle_search_provider_change(self.search_provider_combo.currentText())
@@ -111,10 +121,27 @@ class MainWindow(QMainWindow):
         self.open_folder_button.clicked.connect(self.open_results_folder)
         # Connect search provider change signal to show/hide SearXNG options
         self.search_provider_combo.currentTextChanged.connect(self.handle_search_provider_change)
+        # Connect the engine selector's signal
+        self.searxng_engine_selector.selectionChanged.connect(self._handle_searxng_engine_selection_change)
         # Connect cancel button
         self.cancel_button.clicked.connect(self.cancel_search)
 
+
     # --- Slot Methods ---
+
+    def _handle_searxng_engine_selection_change(self, selected_engines):
+        """Update the config when SearXNG engine selection changes."""
+        if 'search' not in self.config_data: self.config_data['search'] = {}
+        if 'searxng' not in self.config_data['search']: self.config_data['search']['searxng'] = {}
+
+        self.config_data['search']['searxng']['engines'] = selected_engines
+
+        # Save the updated config
+        if save_config(self.config_path, self.config_data):
+            self.log_status(f"SearXNG engine selection saved to {self.config_path}")
+        else:
+            self.log_status(f"[ERROR] Failed to save configuration to {self.config_path}")
+            QMessageBox.warning(self, "Config Error", f"Could not save engine selection to {self.config_path}")
 
     def handle_search_provider_change(self, provider_text):
         """Show/hide SearXNG specific settings."""
@@ -125,8 +152,9 @@ class MainWindow(QMainWindow):
         self.searxng_time_range_input.setVisible(is_searxng)
         self.searxng_categories_label.setVisible(is_searxng)
         self.searxng_categories_input.setVisible(is_searxng)
-        self.searxng_engines_label.setVisible(is_searxng)
-        self.searxng_engines_input.setVisible(is_searxng)
+        # self.searxng_engines_label.setVisible(is_searxng) # Removed old label
+        # self.searxng_engines_input.setVisible(is_searxng) # Removed old input
+        self.searxng_engine_group.setVisible(is_searxng) # Show/hide the whole group
 
     def handle_device_change(self, device_name):
         """Handles changes in the Embedding Device selection."""
@@ -318,15 +346,22 @@ class MainWindow(QMainWindow):
 
         if search_provider_key == 'searxng':
             # Read from GUI and update config_data
+            # Read from GUI and update config_data (excluding engines, which are handled by signal)
             searxng_url = self.searxng_base_url_input.text().strip() or None
             searxng_time_range = self.searxng_time_range_input.text().strip() or None
             searxng_categories = self.searxng_categories_input.text().strip() or None
-            searxng_engines = self.searxng_engines_input.text().strip() or None
+            # searxng_engines = self.searxng_engines_input.text().strip() or None # Removed old input reading
 
             searxng_config['base_url'] = searxng_url
             searxng_config['time_range'] = searxng_time_range
             searxng_config['categories'] = searxng_categories
-            searxng_config['engines'] = searxng_engines
+            # searxng_config['engines'] = searxng_engines # Engine saving is handled by the signal slot
+
+            # Read the current engine selection directly from config_data (updated by the slot)
+            searxng_engines = self.config_data.get('search', {}).get('searxng', {}).get('engines', [])
+            if not isinstance(searxng_engines, list): # Ensure it's a list
+                searxng_engines = []
+
             # Note: max_results for searxng is read inside download_webpages_searxng
 
             # Try saving the updated config
@@ -371,7 +406,7 @@ class MainWindow(QMainWindow):
             "searxng_url": searxng_url,
             "searxng_time_range": searxng_time_range,
             "searxng_categories": searxng_categories,
-            "searxng_engines": searxng_engines,
+            "searxng_engines": searxng_engines, # Pass the list read from config_data
             "config_path": self.config_path # Pass config path so worker can reload fresh config
         }
 

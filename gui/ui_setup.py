@@ -8,9 +8,10 @@ Module responsible for setting up the UI elements of the MainWindow.
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox,
-    QCheckBox, QGroupBox, QFormLayout, QScrollArea, # Added QScrollArea
-    QSizePolicy, QProgressBar # Added QProgressBar
+    QCheckBox, QGroupBox, QFormLayout, QScrollArea, QTreeWidgetItemIterator,
+    QSizePolicy, QProgressBar, QTabWidget # Added QTabWidget
 )
+from gui.ui_components.searxng_selector import SearxngEngineSelector # Import the new widget
 # Note: MainWindow itself is passed in, so we don't import it directly
 # Note: QFileDialog, QMessageBox, QMainWindow are used in MainWindow logic, not setup
 
@@ -40,12 +41,15 @@ def setup_main_window_ui(main_window):
     query_group.setLayout(query_layout)
     left_layout.addWidget(query_group)
 
-    # Configuration Options
-    config_group = QGroupBox("Configuration")
-    config_layout = QFormLayout()
+    # --- Configuration Tabs ---
+    config_tabs = QTabWidget()
+
+    # -- General Tab --
+    general_tab = QWidget()
+    general_layout = QFormLayout(general_tab)
 
     main_window.web_search_checkbox = QCheckBox("Enable Web Search")
-    config_layout.addRow(main_window.web_search_checkbox)
+    general_layout.addRow(main_window.web_search_checkbox)
 
     corpus_layout = QHBoxLayout()
     main_window.corpus_dir_label = QLineEdit()
@@ -54,28 +58,29 @@ def setup_main_window_ui(main_window):
     main_window.corpus_dir_button = QPushButton("Browse...")
     corpus_layout.addWidget(main_window.corpus_dir_label)
     corpus_layout.addWidget(main_window.corpus_dir_button)
-    config_layout.addRow("Local Corpus:", corpus_layout)
+    general_layout.addRow("Local Corpus:", corpus_layout)
 
     main_window.max_depth_spinbox = QSpinBox()
     main_window.max_depth_spinbox.setRange(0, 10)
     main_window.max_depth_spinbox.setValue(1) # Default value
-    config_layout.addRow("Max Recursion Depth:", main_window.max_depth_spinbox)
+    general_layout.addRow("Max Recursion Depth:", main_window.max_depth_spinbox)
 
     main_window.top_k_spinbox = QSpinBox()
     main_window.top_k_spinbox.setRange(1, 50)
     main_window.top_k_spinbox.setValue(3) # Default value
-    config_layout.addRow("Top K Results:", main_window.top_k_spinbox)
+    general_layout.addRow("Top K Results:", main_window.top_k_spinbox)
 
-    # --- Search Provider Configuration ---
-    search_group = QGroupBox("Search Settings")
-    search_layout = QFormLayout()
+    config_tabs.addTab(general_tab, "General")
+
+    # -- Search Tab --
+    search_tab = QWidget()
+    search_layout = QFormLayout(search_tab) # Use QFormLayout for consistency
+
     main_window.search_provider_combo = QComboBox()
     main_window.search_provider_combo.addItems(["DuckDuckGo", "SearXNG"])
-    # Initial value set from config in MainWindow.__init__ after this setup
     search_layout.addRow("Search Provider:", main_window.search_provider_combo)
 
-    # --- SearXNG Specific Settings (visibility handled in MainWindow) ---
-    # Initial values set from config in MainWindow.__init__ after this setup
+    # SearXNG Specific Settings (visibility handled in MainWindow)
     main_window.searxng_base_url_label = QLabel("SearXNG URL:")
     main_window.searxng_base_url_input = QLineEdit()
     main_window.searxng_time_range_label = QLabel("Time Range:")
@@ -84,38 +89,38 @@ def setup_main_window_ui(main_window):
     main_window.searxng_categories_label = QLabel("Categories:")
     main_window.searxng_categories_input = QLineEdit()
     main_window.searxng_categories_input.setPlaceholderText("Optional: general,images,...")
-    main_window.searxng_engines_label = QLabel("Engines:")
-    main_window.searxng_engines_input = QLineEdit()
-    main_window.searxng_engines_input.setPlaceholderText("Optional: google,bing,!wikipedia")
 
     search_layout.addRow(main_window.searxng_base_url_label, main_window.searxng_base_url_input)
     search_layout.addRow(main_window.searxng_time_range_label, main_window.searxng_time_range_input)
     search_layout.addRow(main_window.searxng_categories_label, main_window.searxng_categories_input)
-    search_layout.addRow(main_window.searxng_engines_label, main_window.searxng_engines_input)
 
-    search_group.setLayout(search_layout)
-    config_layout.addRow(search_group)
+    # SearXNG Engine Selection Widget
+    main_window.searxng_engine_group = QGroupBox("SearXNG Engine Selection")
+    searxng_engine_layout = QVBoxLayout() # Use QVBoxLayout for the group
+    main_window.searxng_engine_selector = SearxngEngineSelector()
+    searxng_engine_layout.addWidget(main_window.searxng_engine_selector)
+    main_window.searxng_engine_group.setLayout(searxng_engine_layout)
+    search_layout.addRow(main_window.searxng_engine_group) # Add the group box to the search tab layout
 
+    config_tabs.addTab(search_tab, "Search")
 
-    # --- Embedding Configuration ---
-    embedding_group = QGroupBox("Embedding Settings")
-    embedding_layout = QFormLayout()
+    # -- Embeddings Tab --
+    embeddings_tab = QWidget()
+    embedding_layout = QFormLayout(embeddings_tab)
 
     main_window.device_combo = QComboBox()
     main_window.device_combo.addItems(["cpu", "cuda"])
     embedding_layout.addRow("Embedding Device:", main_window.device_combo)
 
     main_window.embedding_model_combo = QComboBox()
-    # Initially populate based on default device ('cpu') - handled in MainWindow logic
     main_window.embedding_model_label = QLabel("Embedding Model:")
     embedding_layout.addRow(main_window.embedding_model_label, main_window.embedding_model_combo)
 
-    embedding_group.setLayout(embedding_layout)
-    config_layout.addRow(embedding_group)
+    config_tabs.addTab(embeddings_tab, "Embeddings")
 
-    # --- RAG Configuration ---
-    rag_group = QGroupBox("RAG Settings")
-    rag_layout = QFormLayout()
+    # -- RAG Tab --
+    rag_tab = QWidget()
+    rag_layout = QFormLayout(rag_tab)
 
     main_window.rag_model_combo = QComboBox()
     main_window.rag_model_combo.addItems(["gemma", "pali", "gemini", "openrouter", "None"])
@@ -139,16 +144,13 @@ def setup_main_window_ui(main_window):
     main_window.personality_input.setPlaceholderText("Optional: e.g., 'scientific', 'cheerful'")
     main_window.personality_label = QLabel("RAG Personality:")
     rag_layout.addRow(main_window.personality_label, main_window.personality_input)
-    # Initial visibility handled in MainWindow logic
 
-    rag_group.setLayout(rag_layout)
-    config_layout.addRow(rag_group)
+    config_tabs.addTab(rag_tab, "RAG")
 
-    config_group.setLayout(config_layout)
-    left_layout.addWidget(config_group)
+    # Add the tab widget to the main left layout
+    left_layout.addWidget(config_tabs)
 
-
-    # Execution Button
+    # Execution Button (remains below the tabs)
     main_window.run_button = QPushButton("Run Search")
     main_window.run_button.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; padding: 10px; border-radius: 5px; } QPushButton:hover { background-color: #45a049; } QPushButton:disabled { background-color: #cccccc; }")
     left_layout.addWidget(main_window.run_button)

@@ -164,11 +164,37 @@ async def perform_recursive_web_searches(
             max_chars=max_chars
         )
         toc_node.web_results = branch_web_results
+        toc_node.content_relevance_score = None # Initialize content relevance score
+
         # Note: We don't store corpus entries directly in TOC node anymore, they go straight to KB
 
         additional_subqueries = []
-        # Use resolved max_depth
-        if current_depth < max_depth:
+        proceed_with_recursion = True # Flag to control recursion
+
+        # --- Content Relevance Check ---
+        if toc_node.summary and toc_node.summary.strip():
+            summary_embedding = embedder.embed(toc_node.summary)
+            if summary_embedding is not None:
+                content_relevance = late_interaction_score(enhanced_query_embedding, summary_embedding)
+                toc_node.content_relevance_score = content_relevance
+                if content_relevance < min_relevance:
+                    progress_callback(f"Skipping deeper search (low content relevance {content_relevance:.2f}): '{sq_clean[:50]}...'")
+                    print(f"[INFO] Skipping deeper search for '{sq_clean}' due to low content relevance ({content_relevance:.2f} < {min_relevance}).")
+                    proceed_with_recursion = False
+                else:
+                     progress_callback(f"Content relevance check passed ({content_relevance:.2f}) for '{sq_clean[:50]}...'")
+            else:
+                progress_callback(f"[WARN] Failed to embed summary for content relevance check: '{sq_clean[:50]}...'")
+                print(f"[WARN] Failed to embed summary for content relevance check: '{sq_clean}'.")
+                # Decide if failure to embed summary should halt recursion (optional, currently allows recursion)
+        else:
+            progress_callback(f"Skipping content relevance check (empty summary): '{sq_clean[:50]}...'")
+            # Decide if empty summary should halt recursion (optional, currently allows recursion)
+        # --- End Content Relevance Check ---
+
+
+        # Use resolved max_depth and proceed_with_recursion flag
+        if proceed_with_recursion and current_depth < max_depth:
             progress_callback(f"Generating potential sub-subqueries for '{sq_clean[:50]}...'")
             # Assemble llm_config for the enhancement task
             provider = resolved_settings.get('rag_model', 'gemma')

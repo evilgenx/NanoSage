@@ -1,6 +1,7 @@
 # config_utils.py
 import os
 import yaml
+from gui.searxng_engines import DEFAULT_ENABLED_ENGINES # Import the default list
 
 # Default configuration structure
 DEFAULT_CONFIG = {
@@ -72,7 +73,14 @@ Use the provided data to generate a report of at least 3000 words on the topic.
             'safesearch': 1,
             'time_range': None,
             'categories': None,
-            'engines': None
+            'engines': DEFAULT_ENABLED_ENGINES, # Use the imported list as default
+            # Default plugins based on SearXNG documentation
+            'enabled_plugins': [
+                'Hash_plugin', 'Self_Information', 'Tracker_URL_remover', 'Ahmia_blacklist'
+            ],
+            'disabled_plugins': [
+                'Hostnames_plugin', 'Open_Access_DOI_rewrite', 'Vim-like_hotkeys', 'Tor_check_plugin'
+            ]
         }
     },
     'api_keys': {

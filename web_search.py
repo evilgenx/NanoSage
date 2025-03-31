@@ -122,6 +122,8 @@ async def download_webpages_searxng(
     time_range = searxng_config.get('time_range')
     categories = searxng_config.get('categories')
     engines = searxng_config.get('engines')
+    enabled_plugins = searxng_config.get('enabled_plugins') # Read enabled plugins
+    disabled_plugins = searxng_config.get('disabled_plugins') # Read disabled plugins
     # api_key = searxng_config.get('api_key') # If you needed API key auth
 
     if not base_url:
@@ -154,9 +156,18 @@ async def download_webpages_searxng(
         params['safesearch'] = safesearch
     if categories:
         params['categories'] = categories
-    if engines:
-        params['engines'] = engines
-    # Note: 'limit' is not a direct SearXNG API param for the query itself,
+    if engines and isinstance(engines, list) and len(engines) > 0:
+        # Join the list of engine keys into a comma-separated string
+        params['engines'] = ','.join(engines)
+    elif engines and isinstance(engines, str): # Keep backward compatibility if it's already a string
+         params['engines'] = engines
+    # Add plugins if they are configured and are lists
+    if enabled_plugins and isinstance(enabled_plugins, list) and len(enabled_plugins) > 0:
+        params['enabled_plugins'] = ','.join(enabled_plugins)
+    if disabled_plugins and isinstance(disabled_plugins, list) and len(disabled_plugins) > 0:
+        params['disabled_plugins'] = ','.join(disabled_plugins)
+
+    # Note: 'limit' (from max_results) is not a direct SearXNG API param for the query itself,
     # but we'll use it later to limit the number of downloads.
     # SearXNG might return more results than 'limit' based on its internal pagination.
 
@@ -169,7 +180,7 @@ async def download_webpages_searxng(
 
     search_results_list = []
     try:
-        timeout = aiohttp.ClientTimeout(total=15) # Slightly longer timeout for API query
+        timeout = aiohttp.ClientTimeout(total=30) # Increased timeout for API query to 30s
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(search_url, headers={'Accept': 'application/json'}) as response:
                 response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
@@ -203,10 +214,11 @@ async def download_webpages_searxng(
         return []
     except Exception as e:
         # Catch other potential errors (e.g., connection issues, unexpected response structure)
-        error_message = f"Error during SearXNG API query for '{keyword}': {e}"
+        # Change 'e' to 'repr(e)' for more detailed error logging
+        error_message = f"Error during SearXNG API query for '{keyword}': {repr(e)}"
         print(f"[ERROR] {error_message}")
         if progress_callback:
-            progress_callback(f"[ERROR] SearXNG query failed.")
+            progress_callback(f"[ERROR] SearXNG query failed: {repr(e)}") # Also add repr(e) here
         return []
 
     # --- Download Content of Found URLs ---
