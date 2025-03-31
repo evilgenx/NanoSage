@@ -18,7 +18,8 @@ async def perform_recursive_web_searches(
     resolved_settings,
     config, # Pass raw config for advanced settings
     progress_callback,
-    embedder: BaseEmbedder # Changed signature to use embedder
+    embedder: BaseEmbedder, # Changed signature to use embedder
+    cancellation_check_callback=None # Added cancellation callback
     # Removed model, processor, model_type
 ):
     """
@@ -33,6 +34,13 @@ async def perform_recursive_web_searches(
     min_relevance = config.get('advanced', {}).get("min_relevance", 0.5)
 
     for sq in subqueries:
+        # --- Cancellation Check ---
+        if cancellation_check_callback and cancellation_check_callback():
+            progress_callback("Cancellation requested during web recursion.")
+            print("[INFO] Cancellation requested in web_recursive loop.")
+            raise asyncio.CancelledError("Search cancelled by user during web recursion")
+        # --- End Cancellation Check ---
+
         sq_clean = clean_search_query(sq) # Use clean_search_query from utils
         if not sq_clean:
             continue
@@ -184,6 +192,13 @@ async def perform_recursive_web_searches(
                 progress_callback(f"Generated {len(additional_subqueries)} sub-subqueries.")
 
         if additional_subqueries:
+            # --- Cancellation Check ---
+            if cancellation_check_callback and cancellation_check_callback():
+                progress_callback("Cancellation requested before recursive web call.")
+                print("[INFO] Cancellation requested before recursive web call.")
+                raise asyncio.CancelledError("Search cancelled by user before recursive web call")
+            # --- End Cancellation Check ---
+
             # Recursive call returns results, entries, grouped, and child nodes
             # Need to pass all required arguments down
             deeper_web_results, deeper_corpus_entries, _, deeper_toc_nodes = await perform_recursive_web_searches(
@@ -195,7 +210,8 @@ async def perform_recursive_web_searches(
                 resolved_settings=resolved_settings,
                 config=config,
                 progress_callback=progress_callback,
-                embedder=embedder # Pass embedder down
+                embedder=embedder, # Pass embedder down
+                cancellation_check_callback=cancellation_check_callback # Pass callback down
                 # Removed model, processor, model_type
             )
             # Extend the current branch's results and entries

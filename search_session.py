@@ -119,7 +119,7 @@ class SearchSession:
         # Store reference links found during summarization
         self._reference_links = []
 
-    async def run_session(self):
+    async def run_session(self, cancellation_check_callback=None): # Added callback parameter
         """
         Main entry point: perform recursive web search (if enabled) and then local retrieval.
         """
@@ -160,7 +160,8 @@ class SearchSession:
                 resolved_settings=self.resolved_settings,
                 config=self.config,
                 progress_callback=self.progress_callback,
-                embedder=self.embedder # Pass embedder instance
+                embedder=self.embedder, # Pass embedder instance
+                cancellation_check_callback=cancellation_check_callback # Pass callback down
                 # Removed model, processor, model_type
             )
             self.web_results = web_results

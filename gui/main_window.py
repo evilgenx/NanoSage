@@ -111,6 +111,8 @@ class MainWindow(QMainWindow):
         self.open_folder_button.clicked.connect(self.open_results_folder)
         # Connect search provider change signal to show/hide SearXNG options
         self.search_provider_combo.currentTextChanged.connect(self.handle_search_provider_change)
+        # Connect cancel button
+        self.cancel_button.clicked.connect(self.cancel_search)
 
     # --- Slot Methods ---
 
@@ -387,6 +389,10 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0) # Indeterminate mode
 
+        # Show and enable cancel button
+        self.cancel_button.setVisible(True)
+        self.cancel_button.setEnabled(True)
+
         # --- Call initial visibility handler for search provider ---
         self.handle_search_provider_change(self.search_provider_combo.currentText())
 
@@ -444,6 +450,20 @@ class MainWindow(QMainWindow):
         # Hide and reset progress bar
         self.progress_bar.setVisible(False)
         self.progress_bar.setRange(0, 100) # Reset range
+        # Hide and disable cancel button
+        self.cancel_button.setVisible(False)
+        self.cancel_button.setEnabled(False)
+
+    def cancel_search(self):
+        """Requests cancellation of the currently running search worker."""
+        if self.search_worker and self.search_worker.isRunning():
+            self.log_status("Requesting search cancellation...")
+            self.search_worker.request_cancellation() # Need to implement this method in SearchWorker
+            self.cancel_button.setEnabled(False) # Prevent multiple clicks
+            self.log_status("Cancellation requested. Waiting for worker to stop...")
+        else:
+            self.log_status("No search running to cancel.")
+
 
     def open_report(self):
         """Open the generated report file using the default system viewer."""

@@ -160,6 +160,12 @@ def setup_main_window_ui(main_window):
     main_window.progress_bar.setTextVisible(False) # Hide percentage text
     left_layout.addWidget(main_window.progress_bar)
 
+    # Add Cancel Button
+    main_window.cancel_button = QPushButton("Cancel Search")
+    main_window.cancel_button.setStyleSheet("QPushButton { background-color: #f44336; color: white; padding: 8px; border-radius: 4px; } QPushButton:hover { background-color: #da190b; } QPushButton:disabled { background-color: #cccccc; }")
+    main_window.cancel_button.setVisible(False) # Initially hidden
+    main_window.cancel_button.setEnabled(False) # Initially disabled
+    left_layout.addWidget(main_window.cancel_button)
 
     left_layout.addStretch() # Push elements to the top
 
@@ -212,8 +218,8 @@ def setup_main_window_ui(main_window):
     right_scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding) # Apply size policy to scroll area
 
     # Add panels (wrapped in scroll areas) to main layout
-    main_layout.addWidget(left_scroll_area, 1) # Add scroll area instead of panel
-    main_layout.addWidget(right_scroll_area, 2) # Add scroll area instead of panel
+    main_layout.addWidget(left_scroll_area, 2) # Add scroll area instead of panel (Increased stretch)
+    main_layout.addWidget(right_scroll_area, 1) # Add scroll area instead of panel (Decreased stretch)
 
     # --- Initial UI State (handled in MainWindow after setup) ---
     # e.g., setting initial combo box values based on config, hiding/showing elements

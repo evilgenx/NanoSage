@@ -4,7 +4,7 @@
 import os
 import asyncio
 import traceback
-from PyQt6.QtCore import QThread, pyqtSignal, QObject
+from PyQt6.QtCore import QThread, pyqtSignal, QObject, QMutex, QMutexLocker # Added Mutex
 
 # Assuming search_session, llm_utils, and config_utils are accessible from the parent directory
 try:
@@ -33,19 +33,55 @@ class SearchWorker(QThread):
         super().__init__(parent)
         self.params = params
         self._progress_callback_proxy = None # To hold the proxy object
+        self._mutex = QMutex()
+        self._cancellation_requested = False
+
+    def request_cancellation(self):
+        """Sets the cancellation flag."""
+        with QMutexLocker(self._mutex):
+            self._cancellation_requested = True
+            # self.progress_updated.emit("Cancellation flag set.") # Optional debug message
+
+    def is_cancellation_requested(self):
+        """Checks if cancellation has been requested."""
+        with QMutexLocker(self._mutex):
+            return self._cancellation_requested
 
     def run(self):
         """Executes the search session."""
+        # Reset cancellation flag at the start of each run
+        with QMutexLocker(self._mutex):
+            self._cancellation_requested = False
+
         try:
             # Create a proxy object to safely emit signals from the asyncio loop
             class ProgressCallbackProxy(QObject):
                 progress_signal = pyqtSignal(str)
 
                 def __call__(self, message):
+                    # Check cancellation before emitting progress
+                    if self.parent().is_cancellation_requested():
+                         # Optional: could raise a specific exception here if needed
+                         # raise asyncio.CancelledError("Search cancelled by user")
+                         return # Or just stop emitting
                     self.progress_signal.emit(message)
 
+                def set_parent_worker(self, worker):
+                    # Store reference to parent worker to access is_cancellation_requested
+                    self._parent_worker = worker
+                def parent(self):
+                    return self._parent_worker
+
+
             self._progress_callback_proxy = ProgressCallbackProxy()
+            self._progress_callback_proxy.set_parent_worker(self) # Give proxy access to parent
             self._progress_callback_proxy.progress_signal.connect(self.progress_updated.emit)
+
+
+            # Check cancellation before starting
+            if self.is_cancellation_requested():
+                self.progress_updated.emit("Search cancelled before starting.")
+                return
 
             self.progress_updated.emit("Initializing search session...")
 
@@ -89,19 +125,38 @@ class SearchWorker(QThread):
             }
 
             # --- Instantiate SearchSession correctly ---
+            # NOTE: Assumes SearchSession.__init__ accepts cancellation_check_callback
+            # This callback should be checked within SearchSession's async methods.
             session = SearchSession(
                 query=self.params["query"],
                 config=config, # Pass raw config
                 resolved_settings=resolved_settings, # Pass the resolved settings dictionary
                 progress_callback=self._progress_callback_proxy # Pass the callable proxy
+                # Removed cancellation_check_callback from here
             )
+
+            # Check cancellation before running session
+            if self.is_cancellation_requested():
+                self.progress_updated.emit("Search cancelled before running session.")
+                return
 
             self.progress_updated.emit("Starting search process...")
             # Run the asyncio event loop within the thread
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            final_answer = loop.run_until_complete(session.run_session())
+            # Pass cancellation check callback here
+            final_answer = loop.run_until_complete(session.run_session(cancellation_check_callback=self.is_cancellation_requested))
             loop.close()
+
+            # Check for cancellation *after* the loop finishes or is interrupted
+            if self.is_cancellation_requested():
+                self.progress_updated.emit("Search cancelled by user.")
+                return # Skip saving report
+
+            # Check cancellation before saving report
+            if self.is_cancellation_requested():
+                self.progress_updated.emit("Search cancelled before saving report.")
+                return
 
             self.progress_updated.emit("Saving final report...")
             output_path = session.save_report(final_answer)
@@ -109,17 +164,37 @@ class SearchWorker(QThread):
             self.search_complete.emit(output_path)
 
         except ImportError as e:
+             # Check for cancellation before reporting error
+             if self.is_cancellation_requested():
+                 self.progress_updated.emit("Search cancelled during import error.")
+                 return
              self.error_occurred.emit(f"Import Error: {e}. Check dependencies.")
         except FileNotFoundError as e:
+             # Check for cancellation before reporting error
+             if self.is_cancellation_requested():
+                 self.progress_updated.emit("Search cancelled during file not found error.")
+                 return
              self.error_occurred.emit(f"File Not Found Error: {e}")
+        except asyncio.CancelledError:
+             # Handle cancellation if raised within the async tasks
+             self.progress_updated.emit("Search explicitly cancelled within async task.")
+             return
         except Exception as e:
+            # Check for cancellation before reporting error
+            if self.is_cancellation_requested():
+                self.progress_updated.emit("Search cancelled during execution.")
+                return
             # Log the full traceback for better debugging
             traceback.print_exc()
             self.error_occurred.emit(f"An error occurred during search: {e}")
         finally:
             # Clean up proxy if it was created
             if self._progress_callback_proxy:
-                self._progress_callback_proxy.progress_signal.disconnect()
+                # Check if disconnect is needed/safe
+                try:
+                    self._progress_callback_proxy.progress_signal.disconnect()
+                except TypeError:
+                    pass # Signal already disconnected
                 self._progress_callback_proxy = None
 
 
