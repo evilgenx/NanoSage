@@ -1,0 +1,238 @@
+/* gui/style.qss - Basic Stylesheet for NanoSage Modernization */
+
+/* General Window & Widget Styling */
+QWidget {
+    font-family: sans-serif; /* Use a common sans-serif font */
+    font-size: 10pt; /* Adjust base font size as needed */
+    color: #333; /* Dark gray text */
+}
+
+QMainWindow {
+    background-color: #f0f0f0; /* Light gray background */
+}
+
+/* Group Boxes */
+QGroupBox {
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    margin-top: 10px; /* Space above group boxes */
+    padding-top: 15px; /* Space for the title */
+    background-color: #ffffff; /* White background for group content */
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 5px 0 5px;
+    left: 10px; /* Position title slightly indented */
+    color: #555;
+    font-weight: bold;
+}
+
+/* Tab Widget */
+QTabWidget::pane { /* The container for tab contents */
+    border: 1px solid #ccc;
+    border-top: none; /* Pane border overlaps with tab bar border */
+    border-radius: 0 0 5px 5px;
+    padding: 10px;
+    background-color: #ffffff; /* White background for tab content */
+}
+
+QTabBar::tab {
+    background: #e0e0e0; /* Light gray inactive tab */
+    border: 1px solid #ccc;
+    border-bottom: none; /* Tab border merges with pane border */
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    padding: 6px 10px;
+    margin-right: 2px; /* Space between tabs */
+    color: #444;
+}
+
+QTabBar::tab:selected {
+    background: #ffffff; /* White active tab */
+    border-color: #ccc;
+    margin-bottom: -1px; /* Make selected tab appear connected to pane */
+    color: #000;
+}
+
+QTabBar::tab:hover {
+    background: #f0f0f0; /* Slightly lighter gray on hover */
+}
+
+/* Input Fields */
+QLineEdit, QTextEdit, QSpinBox {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 5px;
+    background-color: #fff;
+}
+
+QLineEdit:focus, QTextEdit:focus, QSpinBox:focus {
+    border: 1px solid #4CAF50; /* Highlight focus with theme color */
+}
+
+QTextEdit {
+    min-height: 60px; /* Ensure query input has some initial height */
+}
+
+/* Buttons */
+QPushButton {
+    border: 1px solid #bbb;
+    border-radius: 4px;
+    padding: 6px 12px;
+    background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                      stop: 0 #fdfdfd, stop: 1 #e9e9e9); /* Subtle gradient */
+    color: #333;
+    min-width: 80px; /* Give buttons a minimum width */
+}
+
+QPushButton:hover {
+    background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                      stop: 0 #ffffff, stop: 1 #f0f0f0);
+    border-color: #999;
+}
+
+QPushButton:pressed {
+    background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                      stop: 0 #d9d9d9, stop: 1 #e9e9e9);
+    border-color: #888;
+}
+
+QPushButton:disabled {
+    background-color: #e0e0e0;
+    color: #999;
+    border-color: #ccc;
+}
+
+/* Specific Buttons (Override general style if needed) */
+#run_button { /* Assuming objectName is set to 'run_button' */
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    font-weight: bold;
+}
+#run_button:hover {
+    background-color: #45a049;
+}
+#run_button:disabled {
+    background-color: #cccccc;
+    color: #666666;
+}
+
+#cancel_button { /* Assuming objectName is set to 'cancel_button' */
+    background-color: #f44336;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    font-weight: bold;
+}
+#cancel_button:hover {
+    background-color: #da190b;
+}
+#cancel_button:disabled {
+    background-color: #cccccc;
+    color: #666666;
+}
+
+
+/* Combo Box */
+QComboBox {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 5px;
+    background-color: white;
+    min-width: 6em;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 15px;
+    border-left-width: 1px;
+    border-left-color: #ccc;
+    border-left-style: solid;
+    border-top-right-radius: 3px;
+    border-bottom-right-radius: 3px;
+}
+
+QComboBox::down-arrow {
+    image: url(:/qt-project.org/styles/commonstyle/images/standardbutton-down-arrow-16.png); /* Use a standard arrow */
+}
+
+QComboBox QAbstractItemView { /* Style the dropdown list */
+    border: 1px solid #ccc;
+    background-color: white;
+    selection-background-color: #4CAF50;
+    selection-color: white;
+}
+
+/* Check Box */
+QCheckBox {
+    spacing: 5px; /* Space between checkbox and text */
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+QCheckBox::indicator {
+    width: 13px;
+    height: 13px;
+}
+
+/* Progress Bar */
+QProgressBar {
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    text-align: center;
+    background-color: #e0e0e0;
+    height: 10px; /* Make it slimmer */
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+
+QProgressBar::chunk {
+    background-color: #4CAF50;
+    border-radius: 4px;
+    /* width: 10px; */ /* For indeterminate look, chunk width can be used */
+}
+
+/* Scroll Area / Scroll Bar */
+QScrollArea {
+    border: none; /* Remove border from scroll area itself */
+}
+
+QScrollBar:vertical {
+    border: 1px solid #ccc;
+    background: #f0f0f0;
+    width: 12px;
+    margin: 0px 0px 0px 0px;
+}
+QScrollBar::handle:vertical {
+    background: #bbb;
+    min-height: 20px;
+    border-radius: 5px;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px; /* Hide arrows */
+    background: none;
+}
+/* Add similar styles for QScrollBar:horizontal if needed */
+
+/* Labels */
+QLabel {
+    margin-top: 3px;
+    margin-bottom: 3px;
+}
+
+/* Specific Layout Adjustments (can be done here or in Python) */
+/* Example: Add more space below the query input */
+#query_input { /* Assuming objectName is set */
+    margin-bottom: 10px;
+}
+
+/* Example: Add space between form rows */
+QFormLayout {
+    vertical-spacing: 8px; /* Increase vertical space between rows */
+    horizontal-spacing: 10px; /* Space between label and widget */
+}

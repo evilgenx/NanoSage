@@ -9,8 +9,11 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox,
     QCheckBox, QGroupBox, QFormLayout, QScrollArea, QTreeWidgetItemIterator,
-    QSizePolicy, QProgressBar, QTabWidget # Added QTabWidget
+    QSizePolicy, QProgressBar, QTabWidget, QApplication # Added QTabWidget and QApplication
 )
+from PyQt6.QtGui import QIcon # Import QIcon
+from PyQt6.QtCore import QSize # Import QSize for icon sizing
+
 from gui.ui_components.searxng_selector import SearxngEngineSelector # Import the new widget
 # Note: MainWindow itself is passed in, so we don't import it directly
 # Note: QFileDialog, QMessageBox, QMainWindow are used in MainWindow logic, not setup
@@ -26,16 +29,23 @@ def setup_main_window_ui(main_window):
     central_widget = QWidget()
     main_window.setCentralWidget(central_widget)
     main_layout = QHBoxLayout(central_widget)
+    main_layout.setContentsMargins(10, 10, 10, 10) # Add margins around the main layout
+    main_layout.setSpacing(10) # Add spacing between left and right panels
 
     # --- Left Panel: Configuration ---
     left_panel = QWidget()
     left_layout = QVBoxLayout(left_panel)
+    left_layout.setContentsMargins(0, 0, 0, 0) # Let group boxes handle inner margins
+    left_layout.setSpacing(10) # Space between query group, tabs, button
     left_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
     # Query Input
     query_group = QGroupBox("Search Query")
     query_layout = QVBoxLayout()
+    query_layout.setContentsMargins(10, 10, 10, 10) # Margins inside query group
+    query_layout.setSpacing(8) # Spacing inside query group
     main_window.query_input = QTextEdit()
+    main_window.query_input.setObjectName("query_input") # Set object name
     main_window.query_input.setPlaceholderText("Enter your research query here...")
     query_layout.addWidget(main_window.query_input)
 
@@ -53,6 +63,9 @@ def setup_main_window_ui(main_window):
     # -- General Tab --
     general_tab = QWidget()
     general_layout = QFormLayout(general_tab)
+    general_layout.setContentsMargins(10, 10, 10, 10) # Margins for tab content
+    general_layout.setVerticalSpacing(8) # Space between rows
+    general_layout.setHorizontalSpacing(10) # Space between label/widget
 
     main_window.web_search_checkbox = QCheckBox("Enable Web Search")
     general_layout.addRow(main_window.web_search_checkbox)
@@ -62,6 +75,9 @@ def setup_main_window_ui(main_window):
     main_window.corpus_dir_label.setPlaceholderText("Optional: Path to local documents")
     main_window.corpus_dir_label.setReadOnly(True)
     main_window.corpus_dir_button = QPushButton("Browse...")
+    # Add Icon for Browse
+    browse_icon = QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_DirOpenIcon)
+    main_window.corpus_dir_button.setIcon(browse_icon)
     corpus_layout.addWidget(main_window.corpus_dir_label)
     corpus_layout.addWidget(main_window.corpus_dir_button)
     general_layout.addRow("Local Corpus:", corpus_layout)
@@ -81,6 +97,9 @@ def setup_main_window_ui(main_window):
     # -- Search Tab --
     search_tab = QWidget()
     search_layout = QFormLayout(search_tab) # Use QFormLayout for consistency
+    search_layout.setContentsMargins(10, 10, 10, 10) # Margins for tab content
+    search_layout.setVerticalSpacing(8) # Space between rows
+    search_layout.setHorizontalSpacing(10) # Space between label/widget
 
     main_window.search_provider_combo = QComboBox()
     main_window.search_provider_combo.addItems(["DuckDuckGo", "SearXNG"])
@@ -107,6 +126,7 @@ def setup_main_window_ui(main_window):
     # SearXNG Engine Selection Widget
     main_window.searxng_engine_group = QGroupBox("SearXNG Engine Selection")
     searxng_engine_layout = QVBoxLayout() # Use QVBoxLayout for the group
+    searxng_engine_layout.setContentsMargins(5, 5, 5, 5) # Slightly tighter margins for this specific group
     main_window.searxng_engine_selector = SearxngEngineSelector()
     searxng_engine_layout.addWidget(main_window.searxng_engine_selector)
     main_window.searxng_engine_group.setLayout(searxng_engine_layout)
@@ -117,6 +137,9 @@ def setup_main_window_ui(main_window):
     # -- Embeddings Tab --
     embeddings_tab = QWidget()
     embedding_layout = QFormLayout(embeddings_tab)
+    embedding_layout.setContentsMargins(10, 10, 10, 10) # Margins for tab content
+    embedding_layout.setVerticalSpacing(8) # Space between rows
+    embedding_layout.setHorizontalSpacing(10) # Space between label/widget
 
     main_window.device_combo = QComboBox()
     main_window.device_combo.addItems(["cpu", "cuda"])
@@ -131,6 +154,9 @@ def setup_main_window_ui(main_window):
     # -- RAG Tab --
     rag_tab = QWidget()
     rag_layout = QFormLayout(rag_tab)
+    rag_layout.setContentsMargins(10, 10, 10, 10) # Margins for tab content
+    rag_layout.setVerticalSpacing(8) # Space between rows
+    rag_layout.setHorizontalSpacing(10) # Space between label/widget
 
     main_window.rag_model_combo = QComboBox()
     main_window.rag_model_combo.addItems(["gemma", "pali", "gemini", "openrouter", "None"])
@@ -168,7 +194,9 @@ def setup_main_window_ui(main_window):
 
     # Execution Button (remains below the tabs)
     main_window.run_button = QPushButton("Run Search")
-    main_window.run_button.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; padding: 10px; border-radius: 5px; } QPushButton:hover { background-color: #45a049; } QPushButton:disabled { background-color: #cccccc; }")
+    main_window.run_button.setObjectName("run_button") # Set object name
+    # Remove inline style - will be handled by QSS
+    # main_window.run_button.setStyleSheet("...")
     left_layout.addWidget(main_window.run_button)
 
     # Add Progress Bar
@@ -180,7 +208,9 @@ def setup_main_window_ui(main_window):
 
     # Add Cancel Button
     main_window.cancel_button = QPushButton("Cancel Search")
-    main_window.cancel_button.setStyleSheet("QPushButton { background-color: #f44336; color: white; padding: 8px; border-radius: 4px; } QPushButton:hover { background-color: #da190b; } QPushButton:disabled { background-color: #cccccc; }")
+    main_window.cancel_button.setObjectName("cancel_button") # Set object name
+    # Remove inline style - will be handled by QSS
+    # main_window.cancel_button.setStyleSheet("...")
     main_window.cancel_button.setVisible(False) # Initially hidden
     main_window.cancel_button.setEnabled(False) # Initially disabled
     left_layout.addWidget(main_window.cancel_button)
@@ -196,12 +226,15 @@ def setup_main_window_ui(main_window):
     # --- Right Panel: Status & Results ---
     right_panel = QWidget()
     right_layout = QVBoxLayout(right_panel)
+    right_layout.setContentsMargins(0, 0, 0, 0) # Let group boxes handle inner margins
+    right_layout.setSpacing(10) # Space between status and results groups
     right_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
 
     # Status Log
     status_group = QGroupBox("Status Log")
     status_layout = QVBoxLayout()
+    status_layout.setContentsMargins(10, 10, 10, 10) # Margins inside status group
     main_window.status_log = QTextEdit()
     main_window.status_log.setReadOnly(True)
     main_window.status_log.setPlaceholderText("Search progress will appear here...")
@@ -213,19 +246,35 @@ def setup_main_window_ui(main_window):
     # Results
     results_group = QGroupBox("Results")
     results_layout = QFormLayout()
+    results_layout.setContentsMargins(10, 10, 10, 10) # Margins inside results group
+    results_layout.setVerticalSpacing(8) # Space between rows
+    results_layout.setHorizontalSpacing(10) # Space between label/widget
     main_window.report_path_label = QLabel("Report will appear here.")
     main_window.report_path_label.setWordWrap(True)
     main_window.report_path_label = QLabel("Report will appear here.")
     main_window.report_path_label.setWordWrap(True)
     main_window.open_report_button = QPushButton("Open Report")
-    main_window.open_folder_button = QPushButton("Open Results Folder")
-    main_window.share_email_button = QPushButton("Share via Email") # Added email button
+    main_window.open_folder_button = QPushButton("Open Folder") # Shortened text
+    main_window.share_email_button = QPushButton("Share") # Shortened text
+    # Add Icons for Results Buttons
+    report_icon = QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_FileIcon)
+    folder_icon = QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_DirIcon)
+    share_icon = QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_DialogYesButton) # Using a generic 'action' icon, replace if better exists
+    main_window.open_report_button.setIcon(report_icon)
+    main_window.open_folder_button.setIcon(folder_icon)
+    main_window.share_email_button.setIcon(share_icon)
+    # Set Tooltips for icon buttons
+    main_window.open_report_button.setToolTip("Open the generated report file")
+    main_window.open_folder_button.setToolTip("Open the folder containing the results")
+    main_window.share_email_button.setToolTip("Share report via email")
+
     main_window.open_report_button.setEnabled(False)
     main_window.open_folder_button.setEnabled(False)
     main_window.share_email_button.setEnabled(False) # Initially disabled
 
     results_layout.addRow("Report Path:", main_window.report_path_label)
     button_layout = QHBoxLayout()
+    button_layout.setSpacing(8) # Space between result buttons
     button_layout.addWidget(main_window.open_report_button)
     button_layout.addWidget(main_window.open_folder_button)
     button_layout.addWidget(main_window.share_email_button) # Added email button to layout

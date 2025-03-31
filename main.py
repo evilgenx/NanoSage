@@ -55,8 +55,24 @@ def main():
              # Updated error message
              print("[ERROR] GUI dependencies (PyQt6) are not installed or GUI components (gui/main_window.py) are missing. Cannot launch GUI.")
              sys.exit(1)
+        # Corrected indentation starts here (8 spaces)
         print("[INFO] Launching NanoSage-EG GUI...")
         app = QApplication(sys.argv)
+
+        # --- Apply Stylesheet ---
+        style_path = os.path.join(os.path.dirname(__file__), "gui", "style.qss")
+        if os.path.exists(style_path):
+            try:
+                with open(style_path, "r") as f:
+                    stylesheet = f.read()
+                    app.setStyleSheet(stylesheet)
+                print(f"[INFO] Loaded stylesheet from: {style_path}")
+            except Exception as e:
+                print(f"[WARN] Could not load or apply stylesheet from {style_path}: {e}")
+        else:
+            print(f"[WARN] Stylesheet not found at: {style_path}")
+        # --- End Apply Stylesheet ---
+
         main_window = MainWindow()
         main_window.show()
         sys.exit(app.exec())
