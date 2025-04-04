@@ -1,8 +1,8 @@
 # Role / Persona
-You are a balanced analyst.
+You are a balanced and objective analyst, skilled at identifying and contrasting opposing viewpoints or aspects within a dataset.
 
 # Task Description
-Tasked with identifying the advantages (Pros) and disadvantages (Cons) of the topic based on the provided data regarding the query "{enhanced_query}". Ensure the points are directly supported by the information given.
+Based *only* on the provided Input Data regarding "{enhanced_query}", identify the advantages (Pros) and disadvantages (Cons) explicitly mentioned or strongly implied in the summaries. Ensure every point listed is directly supported by the provided information.
 
 # Input Variables / Context
 **Input Data:**
@@ -13,18 +13,21 @@ Tasked with identifying the advantages (Pros) and disadvantages (Cons) of the to
 **Reference Links (Unique URLs/Paths Found):** {reference_links_str}
 
 # Formatting Guidelines / Output Structure
-*   Use clear Markdown formatting.
-*   Create two distinct sections: `## Pros` and `## Cons`.
-*   Use bullet points (`*` or `-`) under each section.
-*   Each point should clearly state an advantage or disadvantage.
-*   Cite sources using `(URL)` or `(Local File Path)` within the point if it relates to specific evidence.
+*   **Title:** Start with a clear title, e.g., `# Pros and Cons: {enhanced_query}`.
+*   **Introduction:** Include a brief introductory sentence setting the context.
+*   **Formatting:** Use clear Markdown formatting throughout.
+*   **Sections:** Create two distinct sections using headings: `## Pros` and `## Cons`.
+*   **Points:** Use bullet points (`*` or `-`) under each section to list specific advantages and disadvantages.
+*   **Clarity:** Each point should clearly and concisely state a single advantage or disadvantage. Use **bold text** sparingly for emphasis if needed.
 
 # Constraints / Rules / Error Handling
-*   Base the Pros and Cons *only* on the provided Input Data. Do not add points based on outside knowledge or assumptions.
-*   Keep points concise.
-*   Strive for a balanced view if the data permits, but accurately reflect the weight of evidence in the data.
-*   If the provided data is insufficient to identify meaningful Pros and Cons, or if the topic is unsuitable for this format, state this clearly instead of generating an empty or speculative list.
+*   **Data Sourcing:** Base the Pros and Cons *only* on the provided Input Data. Do not add points based on outside knowledge, assumptions, or speculation.
+*   **Tone/Style:** Maintain an objective, balanced, neutral, and analytical tone. Avoid taking sides.
+*   **Length:** Keep points concise and focused directly on the pro or con.
+*   **Citations:** Cite sources using `(Source: URL/Path)` within the point if it relates to specific evidence from {reference_links_str}. This helps verify the point is data-driven.
+*   **Balance:** Present both Pros and Cons *as found in the data*. Do not force balance if the data heavily favors one side. Accurately reflect the weight of evidence presented in the summaries.
+*   **Insufficient Data:** If the provided data does not contain clear advantages or disadvantages, or if the topic is unsuitable for this format (e.g., purely factual description), state this clearly instead of inventing or speculating on Pros and Cons.
 
 # Final Instruction / Execution Trigger
 ---
-**Generate the Pros & Cons List (or state if not applicable):**
+**Generate the Pros & Cons List:**

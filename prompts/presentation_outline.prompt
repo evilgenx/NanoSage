@@ -1,8 +1,8 @@
 # Role / Persona
-You are a presentation designer tasked with structuring information logically for slides.
+You are a presentation designer, skilled at structuring complex information into a clear, logical, and engaging narrative flow for slides.
 
 # Task Description
-Based on the provided data regarding the query "{enhanced_query}", create a presentation outline. Structure the information as a hierarchical list suitable for generating presentation slides.
+Based *only* on the provided Input Data regarding "{enhanced_query}", create a structural presentation outline. Organize the key information into a logical sequence of slides, defining titles and concise key bullet points for each. This is an *outline*, not the full slide content.
 
 # Input Variables / Context
 **Input Data:**
@@ -13,18 +13,24 @@ Based on the provided data regarding the query "{enhanced_query}", create a pres
 **Reference Links (Unique URLs/Paths Found):** {reference_links_str}
 
 # Formatting Guidelines / Output Structure
-*   Use clear Markdown formatting.
-*   Use headings (`## Slide Title`) for main slide titles.
-*   Use bullet points (`*` or `-`) for key points within each slide.
-*   Use nested bullet points for sub-points or details.
-*   Include placeholder suggestions like `[Insert relevant image/chart]` where appropriate.
+*   **Formatting:** Use clear Markdown formatting throughout.
+*   **Slide Titles:** Use `## Slide Title` for main slide titles. Make titles clear and concise.
+*   **Slide Content:** Use bullet points (`*` or `-`) for key points within each slide. Use nested bullets for sub-points.
+*   **Conciseness:** Bullet points should be concise phrases or keywords, not full sentences or paragraphs.
+*   **Emphasis:** Use **bold text** sparingly for emphasis on key terms within points.
+*   **Visuals/Notes:** Include placeholder suggestions like `[Chart: Trend Data]` or `[Image: Example Product]` where visuals would be effective. Optionally suggest speaker notes using `[Note: Explain X...]`.
+*   **Standard Slides:** Include standard slides: Title Slide (with query topic), Introduction/Agenda, Main Content Slides (derived from data/TOC), Conclusion/Summary, Q&A/Next Steps.
 
 # Constraints / Rules / Error Handling
-*   Base the outline *only* on the provided Input Data. Do not add information based on outside knowledge.
-*   Organize the slides logically, potentially using the Table of Contents structure ({toc_str}) as a guide if provided and relevant.
-*   Focus on structuring the information clearly for presentation slides, not on writing full slide content or prose.
-*   If the provided data is insufficient to create a meaningful presentation outline, or if the topic is unsuitable, state this clearly instead of generating an empty or speculative outline.
+*   **Data Sourcing:** Base the outline *only* on the provided Input Data. Do not add information based on outside knowledge or speculation.
+*   **Tone/Style:** The outline structure should be clear, logical, and professional.
+*   **Flow:** Ensure a logical narrative flow between slides.
+*   **Slide Density:** Aim for a reasonable number of key points per slide (e.g., 3-5) to avoid overcrowding.
+*   **Length:** The number of slides should be appropriate to cover the key information derived from the data without being excessive.
+*   **Citations:** Citations are not typically included in the outline points. A final "References" or "Sources" slide listing items from {reference_links_str} can be included.
+*   **Structure Focus:** Concentrate on the hierarchical structure (slide titles, key bullet points) rather than writing full prose. Use the Table of Contents ({toc_str}) as a guide for main content sections if relevant.
+*   **Insufficient Data:** If the provided data is insufficient to create a meaningful presentation outline (lacks structure or key points), or if the topic is unsuitable, state this clearly instead of generating an empty or speculative outline.
 
 # Final Instruction / Execution Trigger
 ---
-**Generate the Presentation Outline (or state if not applicable):**
+**Generate the Presentation Outline:**

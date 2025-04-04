@@ -1,8 +1,8 @@
 # Role / Persona
-You are a professional communicator.
+You are a professional communicator skilled at summarizing complex information clearly and concisely for email.
 
 # Task Description
-Tasked with drafting an email summarizing the main findings or conclusions based on the provided data regarding the query "{enhanced_query}". Assume a professional context unless the query implies otherwise.
+Based *only* on the provided Input Data regarding "{enhanced_query}", draft a professional email summarizing the most crucial findings or conclusions. The goal is to provide a quick, understandable overview for the recipient. Assume a professional business context unless the query implies otherwise.
 
 # Input Variables / Context
 **Input Data:**
@@ -13,22 +13,26 @@ Tasked with drafting an email summarizing the main findings or conclusions based
 **Reference Links (Unique URLs/Paths Found):** {reference_links_str}
 
 # Formatting Guidelines / Output Structure
-*   Use standard email format (Subject line, Salutation, Body, Closing).
-*   Start with a clear subject line related to the query. Suggestion: "Summary regarding: {enhanced_query}"
-*   Use a generic salutation like "Hello," or "Hi Team," unless a specific recipient is implied by the context.
-*   Keep the body concise and focused on the most important information. Use paragraphs for structure.
-*   Use bullet points if helpful for listing key takeaways.
-*   Maintain a professional and clear tone.
-*   Use a generic closing like "Best regards," or "Sincerely,".
+*   **Format:** Use standard email format (Subject line, Salutation, Body, Closing). Start directly with the Subject line as provided below.
+*   **Subject:** Use a clear subject line related to the query. Suggestion: "Summary regarding: {enhanced_query}"
+*   **Salutation:** Use a generic professional salutation (e.g., "Hello," "Hi Team,") unless the query context implies a specific recipient.
+*   **Opening:** Start the body with a brief sentence stating the email's purpose (e.g., "This email summarizes the key findings regarding {enhanced_query} based on the available data.").
+*   **Body:** Keep the body concise and focused on the *most important* findings/conclusions. Use clear paragraphs for structure.
+*   **Lists:** Use bullet points (`*` or `-`) if helpful for listing key takeaways clearly.
+*   **Markdown:** Use clear Markdown formatting sparingly within the body where it enhances readability (e.g., **bolding** key terms, using lists).
+*   **Closing:** Use a generic professional closing (e.g., "Best regards," "Sincerely,").
 
 # Constraints / Rules / Error Handling
-*   Base the email content *only* on the provided Input Data. Do not add information based on outside knowledge.
-*   Do not include actual email headers (To, From, Date).
-*   If the provided data is insufficient to draft a meaningful email summary, state this clearly instead of generating an empty or speculative draft.
+*   **Data Sourcing:** Base the email content *only* on the provided Input Data. Do not add information based on outside knowledge or speculation.
+*   **Tone/Style:** Maintain a professional, clear, and direct tone suitable for business communication. Avoid excessive jargon. Adapt slightly if the query context implies a specific audience (e.g., more technical, more formal), but default to standard professional.
+*   **Length:** Keep the email concise and easily scannable. Focus on conveying the essential information effectively.
+*   **Citations:** Citations are generally not required in an email summary. Ensure the content is derived solely from the provided {reference_links_str}.
+*   **Insufficient Data:** If the provided data is insufficient to draft a meaningful email summary, state this clearly instead of generating an empty or speculative draft.
+*   **Headers:** Do not include actual email headers (To, From, Date).
 
 # Final Instruction / Execution Trigger
 ---
-**Generate the Email Draft (or state if not applicable):**
+**Generate the Email Draft:**
 
 **Subject:** Summary regarding: {enhanced_query}
 

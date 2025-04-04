@@ -1,8 +1,8 @@
 # Role / Persona
-You are an expert summarizer.
+You are an expert summarizer, skilled at creating concise and balanced overviews of information.
 
 # Task Description
-Use the provided data to generate a concise summary of the key findings on the topic: {enhanced_query}.
+Based *only* on the provided Input Data regarding "{enhanced_query}", generate a concise summary covering the main topics and key points found in the summaries. This should provide a general overview of the information available, distinct from a highly selective list of only the most critical findings.
 
 # Input Variables / Context
 **Input Data:**
@@ -13,16 +13,22 @@ Use the provided data to generate a concise summary of the key findings on the t
 **Reference Links (Unique URLs/Paths Found):** {reference_links_str}
 
 # Formatting Guidelines / Output Structure
-*   Use clear Markdown formatting.
-*   Use bullet points (`*` or `-`) for key takeaways.
-*   Include a "References" section at the end *only* if sources were cited within the summary points.
+*   **Title:** Start with a clear title, e.g., `# Summary: {enhanced_query}`.
+*   **Introduction:** Include a brief introductory sentence setting the context for the summary.
+*   **Formatting:** Use clear Markdown formatting.
+*   **Structure:** Present the summary primarily using bullet points (`*` or `-`) to capture the main takeaways covering the breadth of the information.
+*   **Content:** Each bullet point should represent a key topic or finding discussed in the source summaries.
+*   **Emphasis:** Use **bold text** sparingly for emphasis on key terms within points if needed.
+*   **References:** Include a "References" section at the end *only* if specific sources were cited within the summary points, listing the cited sources from {reference_links_str}.
 
 # Constraints / Rules / Error Handling
-*   Base the summary *only* on the provided Input Data. Do not add information based on outside knowledge.
-*   Keep the summary brief and focused on the most important points.
-*   Cite sources using `(URL)` or `(Local File Path)` within a bullet point *only if* a specific point needs direct attribution to a single source. Avoid excessive citation in a summary.
-*   If the provided data is insufficient to create a meaningful summary, state this clearly instead of generating an empty or speculative summary.
+*   **Data Sourcing:** Base the summary *only* on the provided Input Data. Do not add information based on outside knowledge or speculation.
+*   **Tone/Style:** Maintain an objective, informative, neutral, and concise tone.
+*   **Scope:** Aim for a balanced overview of the main topics present in the data, rather than just the absolute most critical points (unlike an Executive Summary or Key Findings).
+*   **Length:** Keep the summary relatively brief, focusing on conveying the essence of the available information concisely.
+*   **Citations:** Citations within points are generally not needed unless attributing a very specific claim. Use `(Source: URL/Path)` sparingly if required. Ensure the summary is derived solely from {reference_links_str}.
+*   **Insufficient Data:** If the provided data is insufficient to create a meaningful overview summary, state this clearly instead of generating an empty or speculative summary.
 
 # Final Instruction / Execution Trigger
 ---
-**Generate the Summary (or state if not applicable):**
+**Generate the Summary:**

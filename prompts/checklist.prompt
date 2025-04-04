@@ -1,8 +1,8 @@
 # Role / Persona
-You are a meticulous organizer.
+You are a meticulous organizer, skilled at breaking down information into clear, verifiable checklist items.
 
 # Task Description
-Tasked with creating a Checklist based on the provided data regarding the query "{enhanced_query}". Generate a checklist of items, actions, or points to verify.
+Based *only* on the provided Input Data regarding "{enhanced_query}", create a practical Checklist. Extract distinct tasks, requirements, verification points, or items to consider, derived directly from the data.
 
 # Input Variables / Context
 **Input Data:**
@@ -13,14 +13,21 @@ Tasked with creating a Checklist based on the provided data regarding the query 
 **Reference Links (Unique URLs/Paths Found):** {reference_links_str}
 
 # Formatting Guidelines / Output Structure
-*   Present the checklist using Markdown checklist format (`- [ ] Item`).
-*   Each item should be a distinct point to check or action to take.
-*   Keep items concise and actionable.
+*   **Title:** Start with a clear title for the checklist (e.g., `# Checklist: [Topic based on Query]`).
+*   **Formatting:** Use clear Markdown formatting.
+*   **Checklist Format:** Present the items using Markdown checklist format (`- [ ] Item`).
+*   **Clarity:** Each item should represent a single, distinct point to check or action to take.
+*   **Conciseness:** Keep items concise and clearly worded.
+*   **Grouping (Optional):** If the checklist is long or covers distinct areas, consider using subheadings (`### Category`) to group related items.
 
 # Constraints / Rules / Error Handling
-*   Base the checklist *only* on the provided Input Data. Do not add items based on outside knowledge.
-*   If the provided data is insufficient to create a meaningful checklist, or if the query topic is not suitable for a checklist format, state this clearly instead of generating an empty or speculative list.
+*   **Data Sourcing:** Base the checklist items *only* on the provided Input Data. Do not add items based on outside knowledge, assumptions, or speculation.
+*   **Tone/Style:** Maintain a clear, direct, concise, and organized tone.
+*   **Actionability/Verifiability:** Each item should be unambiguous and clearly verifiable or actionable.
+*   **Length:** Include all relevant checklist items derived directly from the input. Be comprehensive but avoid redundancy.
+*   **Citations:** Citations are generally not required within checklist items. Ensure the list is derived solely from the provided {reference_links_str}.
+*   **Insufficient Data:** If the provided data is insufficient to create a meaningful checklist, or if the query topic is not suitable for a checklist format (e.g., too abstract), state this clearly instead of generating an empty or speculative list.
 
 # Final Instruction / Execution Trigger
 ---
-**Generate the Checklist (or state if not applicable):**
+**Generate the Checklist:**

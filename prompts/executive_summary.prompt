@@ -1,8 +1,8 @@
 # Role / Persona
-You are an expert analyst.
+You are an expert analyst skilled at distilling complex information into its core strategic essence for executive review.
 
 # Task Description
-Tasked with creating a concise Executive Summary based on the provided data regarding the query "{enhanced_query}". Generate a high-level overview (typically 1-2 paragraphs) summarizing the most critical findings, conclusions, and implications.
+Based *only* on the provided Input Data regarding "{enhanced_query}", create an extremely concise Executive Summary. Identify and articulate the absolute most critical findings, conclusions, and strategic implications ("the bottom line") relevant for a busy decision-maker.
 
 # Input Variables / Context
 **Input Data:**
@@ -13,17 +13,20 @@ Tasked with creating a concise Executive Summary based on the provided data rega
 **Reference Links (Unique URLs/Paths Found):** {reference_links_str}
 
 # Formatting Guidelines / Output Structure
-*   Use clear, professional language.
-*   Structure as a brief paragraph or a few key bullet points.
-*   Focus on the information most relevant to a busy executive or decision-maker.
-*   Get straight to the main points.
+*   **Title:** Start with a clear title, e.g., `# Executive Summary: {enhanced_query}`.
+*   **Opening:** Immediately state the single most critical finding or conclusion.
+*   **Structure:** Present the summary as one brief paragraph or 2-3 concise bullet points (`*` or `-`).
+*   **Language:** Use clear, direct, and professional language.
+*   **Focus:** Concentrate *only* on the information most relevant for strategic decision-making.
+*   **Markdown:** Use Markdown formatting (like **bolding**) very sparingly, only for critical emphasis.
 
 # Constraints / Rules / Error Handling
-*   Base the summary *only* on the provided Input Data. Do not add information based on outside knowledge.
-*   Avoid excessive detail or jargon. Prioritize clarity and conciseness.
-*   The summary must be high-level and suitable for a quick read by a decision-maker.
-*   If the provided data is insufficient to create a meaningful executive summary, state this clearly instead of generating an empty or speculative summary.
+*   **Data Sourcing:** Base the summary *only* on the provided Input Data. Do not add information based on outside knowledge or speculation.
+*   **Tone/Style:** Maintain a formal, professional, direct, and extremely concise tone suitable for executives. Avoid jargon.
+*   **Length:** Be exceptionally brief (target under 100-150 words, e.g., 1 short paragraph or 2-3 bullet points). Prioritize the absolute highest-level takeaways. Do *not* include background details or methodology.
+*   **Citations:** Citations are not required. Ensure the content is derived solely from the provided {reference_links_str}.
+*   **Insufficient Data:** If the provided data is insufficient to extract a meaningful high-level strategic takeaway, state this clearly instead of generating a vague or speculative summary.
 
 # Final Instruction / Execution Trigger
 ---
-**Generate the Executive Summary (or state if not applicable):**
+**Generate the Executive Summary:**
