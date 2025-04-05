@@ -248,6 +248,36 @@ python main.py --query "Climate change impact on economy" \
 
 ---
 
+### 7. Choosing the Output Format
+
+NanoSage-EG can generate different types of outputs based on the research findings by using different prompt templates located in the `prompts/` directory. You can specify which template to use via the `rag_report_prompt_template` setting in your `config.yaml` file or potentially through future command-line arguments.
+
+Here are the available output formats:
+
+*   **`report.prompt` (Default):** Generates a comprehensive, well-structured report synthesizing information from web and local sources, following the discovered Table of Contents. Includes Introduction, Main Body, Conclusion, and References.
+*   **`action_plan.prompt`:** Creates a practical, numbered list of actionable steps or recommendations derived directly from the research findings.
+*   **`blog_post.prompt`:** Generates a narrative blog post discussing the research topic and findings in an engaging style.
+*   **`checklist.prompt`:** Produces a checklist of items, tasks, or points relevant to the query.
+*   **`email_draft.prompt`:** Drafts an email summarizing or discussing the key findings of the research.
+*   **`executive_summary.prompt`:** Creates a concise, high-level summary of the research suitable for busy stakeholders.
+*   **`faq.prompt`:** Generates a list of frequently asked questions (FAQs) and their answers based on the research data.
+*   **`guide.prompt`:** Produces a step-by-step guide or instructional document related to the query topic.
+*   **`key_findings.prompt`:** Extracts and lists the most critical insights or discoveries from the research.
+*   **`presentation_outline.prompt`:** Generates a structured outline (e.g., using bullet points and indentation) suitable for creating a presentation.
+*   **`pros_cons.prompt`:** Lists the advantages (pros) and disadvantages (cons) related to the research topic based on the findings.
+*   **`summary.prompt`:** Provides a general summary of the research findings, less structured than the full report.
+*   **`swot_analysis.prompt`:** Performs a SWOT analysis (Strengths, Weaknesses, Opportunities, Threats) based on the information gathered about the query topic.
+
+To use a specific format, update the `rag_report_prompt_template` value in your `config.yaml` under the `llm` section:
+
+```yaml
+llm:
+  # ... other llm settings
+  rag_report_prompt_template: prompts/action_plan.prompt # Example: Use the action plan format
+```
+
+---
+
 ### 6. Troubleshooting
 
 - **Missing dependencies?** Rerun: `pip install -r requirements.txt`
