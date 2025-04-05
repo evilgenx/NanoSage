@@ -115,18 +115,25 @@ def setup_main_window_ui(main_window):
 
     # -- Search Tab --
     search_tab = QWidget()
-    search_layout = QFormLayout(search_tab) # Use QFormLayout for consistency
-    search_layout.setContentsMargins(10, 10, 10, 10) # Margins for tab content
-    search_layout.setVerticalSpacing(8) # Space between rows
-    search_layout.setHorizontalSpacing(10) # Space between label/widget
+    # Main horizontal layout for the two columns
+    search_main_layout = QHBoxLayout(search_tab)
+    search_main_layout.setContentsMargins(10, 10, 10, 10)
+    search_main_layout.setSpacing(10)
+
+    # Left Column (Group Box with Form Layout for settings)
+    left_column_group = QGroupBox("Search Settings")
+    left_column_layout = QFormLayout(left_column_group) # Set layout for the group box
+    # left_column_layout.setContentsMargins(10, 10, 10, 10) # Use default group box margins
+    left_column_layout.setVerticalSpacing(8)
+    left_column_layout.setHorizontalSpacing(10)
 
     main_window.search_provider_combo = QComboBox()
     main_window.search_provider_combo.addItems(["DuckDuckGo", "SearXNG"])
-    search_layout.addRow("Search Provider:", main_window.search_provider_combo)
+    left_column_layout.addRow("Search Provider:", main_window.search_provider_combo)
 
     # Iterative Search Checkbox
     main_window.iterative_search_checkbox = QCheckBox("Enable Iterative Search (Experimental)")
-    search_layout.addRow(main_window.iterative_search_checkbox)
+    left_column_layout.addRow(main_window.iterative_search_checkbox) # Add checkbox directly
 
     # SearXNG Specific Settings (visibility handled in MainWindow)
     main_window.searxng_base_url_label = QLabel("SearXNG URL:")
@@ -138,9 +145,16 @@ def setup_main_window_ui(main_window):
     main_window.searxng_categories_input = QLineEdit()
     main_window.searxng_categories_input.setPlaceholderText("Optional: general,images,...")
 
-    search_layout.addRow(main_window.searxng_base_url_label, main_window.searxng_base_url_input)
-    search_layout.addRow(main_window.searxng_time_range_label, main_window.searxng_time_range_input)
-    search_layout.addRow(main_window.searxng_categories_label, main_window.searxng_categories_input)
+    left_column_layout.addRow(main_window.searxng_base_url_label, main_window.searxng_base_url_input)
+    left_column_layout.addRow(main_window.searxng_time_range_label, main_window.searxng_time_range_input)
+    left_column_layout.addRow(main_window.searxng_categories_label, main_window.searxng_categories_input)
+
+    # Right Column (Widget with Vertical Layout for Engine Selector)
+    # Note: We keep the right column structure similar to the previous attempt
+    right_column_widget = QWidget()
+    right_column_layout = QVBoxLayout(right_column_widget)
+    right_column_layout.setContentsMargins(0, 0, 0, 0) # No inner margins for the VBox itself
+    right_column_layout.setSpacing(8)
 
     # SearXNG Engine Selection Widget
     main_window.searxng_engine_group = QGroupBox("SearXNG Engine Selection")
@@ -149,7 +163,13 @@ def setup_main_window_ui(main_window):
     main_window.searxng_engine_selector = SearxngEngineSelector()
     searxng_engine_layout.addWidget(main_window.searxng_engine_selector)
     main_window.searxng_engine_group.setLayout(searxng_engine_layout)
-    search_layout.addRow(main_window.searxng_engine_group) # Add the group box to the search tab layout
+    main_window.searxng_engine_group.setMinimumWidth(200) # Keep minimum width
+    right_column_layout.addWidget(main_window.searxng_engine_group)
+    right_column_layout.addStretch() # Push engine selector to the top
+
+    # Add columns (left group box, right widget) to the main search tab layout
+    search_main_layout.addWidget(left_column_group, 1) # Add the group box (stretch = 1)
+    search_main_layout.addWidget(right_column_widget, 1) # Add the widget (stretch = 1)
 
     config_tabs.addTab(search_tab, "Search")
 
