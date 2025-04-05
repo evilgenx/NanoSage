@@ -15,6 +15,23 @@ class PdfParser(BaseParser):
             raise ImportError("PDF parsing requires PyMuPDF. Please install it: pip install PyMuPDF")
         self.max_pages = max_pages
 
+    def _format_table_data(self, extracted_data: list[list[str | None]]) -> str:
+        """Formats extracted table data (list of lists) into a plain text string."""
+        if not extracted_data:
+            return ""
+        formatted_table = "--- TABLE START ---\n"
+        try:
+            for row in extracted_data:
+                # Ensure all cell contents are strings, handling None
+                formatted_row = " | ".join(str(cell) if cell is not None else "" for cell in row)
+                formatted_table += formatted_row + "\n"
+            formatted_table += "--- TABLE END ---\n"
+        except Exception as e:
+            print(f"[WARN] Could not format table row data: {e}")
+            # Return minimal info even if formatting fails mid-way
+            formatted_table += "... (error formatting table) ...\n--- TABLE END ---\n"
+        return formatted_table
+
     def parse(self, file_path: str) -> str:
         """Extracts text content from a PDF file."""
         if not os.path.exists(file_path):
@@ -30,10 +47,34 @@ class PdfParser(BaseParser):
 
             for page_num in range(num_pages_to_process):
                 page = doc.load_page(page_num)
-                extracted_text += page.get_text("text") + "\n" # Use "text" for better layout preservation
+                page_text = page.get_text("text") # Get standard text first
+                tables_text = "" # Initialize table text for the page
 
-            # Return the extracted text if successful
-            return extracted_text
+                # --- Add Table Extraction ---
+                try:
+                    # Default strategy is "lines", can be tuned if needed
+                    table_settings = {} 
+                    table_finder = page.find_tables(strategy=table_settings.get("strategy", "lines"), 
+                                                    vertical_strategy=table_settings.get("vertical_strategy", "lines"),
+                                                    horizontal_strategy=table_settings.get("horizontal_strategy", "lines"))
+                    if table_finder.tables:
+                        # print(f"[DEBUG] Found {len(table_finder.tables)} tables on page {page_num + 1}") # Optional debug log
+                        for table in table_finder.tables:
+                            # Extract table data
+                            extracted_data = table.extract()
+                            if extracted_data:
+                                # Format and append
+                                tables_text += self._format_table_data(extracted_data) + "\n"
+                except Exception as table_ex:
+                    # Log warning but continue processing the page
+                    print(f"[WARN] Error processing tables on page {page_num + 1} of {file_path}: {table_ex}")
+                # --- End Table Extraction ---
+
+                # Append page text and then any extracted table text
+                extracted_text += page_text + "\n" + tables_text
+
+            # Return the combined extracted text if successful
+            return extracted_text.strip() # Use strip() to remove potential trailing newline
         except Exception as e:
             print(f"[ERROR] Failed to parse PDF file {file_path}: {e}")
             raise # Re-raise the exception
