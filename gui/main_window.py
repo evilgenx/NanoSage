@@ -123,16 +123,16 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self):
         """Connect UI signals to slots in the controller or result actions."""
-        # Connect run button to controller's start method
-        self.run_button.clicked.connect(self.controller.start_search_process)
+        # Connect run button to controller's start method (Handled in GuiController.__init__)
+        # self.run_button.clicked.connect(self.controller.start_search_process) # Redundant
         self.corpus_dir_button.clicked.connect(self.select_corpus_directory)
         # Connect device change signal (still handled locally for UI updates)
         self.device_combo.currentTextChanged.connect(self.handle_device_change)
         # Connect RAG model change signal
         self.rag_model_combo.currentTextChanged.connect(self.handle_rag_model_change)
-        # Connect generative model fetch buttons to controller
-        self.gemini_fetch_button.clicked.connect(self.controller.fetch_gemini_models)
-        self.openrouter_fetch_button.clicked.connect(self.controller.fetch_openrouter_models)
+        # Connect generative model fetch buttons to controller's ModelFetcherManager
+        self.gemini_fetch_button.clicked.connect(self.controller.model_fetcher_manager.fetch_gemini_models)
+        self.openrouter_fetch_button.clicked.connect(self.controller.model_fetcher_manager.fetch_openrouter_models)
         # Connect result buttons to result_actions functions (using lambda to pass state)
         self.open_report_button.clicked.connect(lambda: result_actions.open_report(self.current_report_path, self.log_status))
         self.open_folder_button.clicked.connect(lambda: result_actions.open_results_folder(self.current_results_dir, self.log_status))
