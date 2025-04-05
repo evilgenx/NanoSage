@@ -38,9 +38,9 @@ def create_embedder(embedding_model_name: str, device: str) -> BaseEmbedder:
                     is incompatible (e.g., trying to load local model on 'Gemini').
         ImportError: If required dependencies for the selected model are missing.
     """
-    if device not in ["cpu", "cuda"]:
+    if device not in ["cpu", "cuda", "rocm"]:
         # This factory currently only handles local models
-        raise ValueError(f"Device '{device}' is not supported for local embedder creation. Use 'cpu' or 'cuda'.")
+        raise ValueError(f"Device '{device}' is not supported for local embedder creation. Use 'cpu', 'cuda', or 'rocm'.")
 
     config = EMBEDDER_REGISTRY.get(embedding_model_name.lower())
 

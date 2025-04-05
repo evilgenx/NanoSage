@@ -142,7 +142,7 @@ def setup_main_window_ui(main_window):
     embedding_layout.setHorizontalSpacing(10) # Space between label/widget
 
     main_window.device_combo = QComboBox()
-    main_window.device_combo.addItems(["cpu", "cuda"])
+    main_window.device_combo.addItems(["cpu", "cuda", "rocm"]) # Added rocm
     embedding_layout.addRow("Embedding Device:", main_window.device_combo)
 
     main_window.embedding_model_combo = QComboBox()

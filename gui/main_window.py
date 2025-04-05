@@ -266,7 +266,7 @@ class MainWindow(QMainWindow):
         # self.gemini_embedding_fetch_button.setEnabled(True)
         # self.openrouter_embedding_fetch_button.setEnabled(True)
 
-        if device_name == "cpu" or device_name == "cuda":
+        if device_name == "cpu" or device_name == "cuda" or device_name == "rocm": # Added rocm
             self.embedding_model_combo.addItems(["colpali", "all-minilm"])
             self.embedding_model_label.setText("Embedding Model:")
         # Removed elif blocks for "Gemini" and "OpenRouter" as they are no longer options

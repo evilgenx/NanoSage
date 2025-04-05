@@ -30,7 +30,7 @@ def main():
     parser.add_argument("--query", type=str, help="Initial user query (required for CLI mode)")
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to YAML configuration file")
     parser.add_argument("--corpus_dir", type=str, default=None, help="Path to local corpus folder")
-    parser.add_argument("--device", type=str, default="cpu", help="Device for retrieval model (cpu or cuda)")
+    parser.add_argument("--device", type=str, default="cpu", help="Device for retrieval model (cpu, cuda, or rocm)") # Updated help text
     # Renamed retrieval_model to embedding_model for consistency internally
     parser.add_argument("--embedding_model", type=str, default="colpali", help="Embedding model name (e.g., colpali, all-minilm, models/embedding-001, openai/text-embedding-ada-002)")
     parser.add_argument("--top_k", type=int, default=None, help="Number of local docs to retrieve") # Default None to detect if set
