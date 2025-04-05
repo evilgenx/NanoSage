@@ -14,8 +14,9 @@ Based *only* on the findings and information present in the provided Input Data 
 
 # Formatting Guidelines / Output Structure
 *   Use clear Markdown formatting.
-*   Start with a brief introductory sentence summarizing the plan's objective.
-*   Present the plan as a clear, numbered list (`1.`, `2.`, `3.`).
+*   Start the output with a main heading (H1) using the exact text from the 'User Query' provided above (e.g., `# {enhanced_query}`).
+*   Follow the heading with a brief introductory sentence summarizing the plan's objective.
+*   Present the core plan as a clear, numbered list (`1.`, `2.`, `3.`).
 *   Start each item with a strong action verb (e.g., "Implement", "Analyze", "Contact", "Develop", "Research", "Evaluate").
 *   Keep each step focused, concise, and clearly actionable.
 *   If applicable, briefly mention the rationale or expected outcome for a step within the item.

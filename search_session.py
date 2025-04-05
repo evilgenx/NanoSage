@@ -166,6 +166,10 @@ class SearchSession:
             self.web_results = web_results
             self.grouped_web_results = grouped
             self.toc_tree = toc_nodes
+            # Assign anchor IDs after the tree is built
+            if self.toc_tree:
+                self.progress_callback("Assigning anchor IDs to TOC nodes...")
+                toc_tree.assign_anchor_ids(self.toc_tree)
             # Add new entries to the knowledge base
             self.progress_callback(f"Adding {len(web_entries)} web entries to knowledge base...")
             self.kb.add_documents(web_entries) # KB handles API keys internally now

@@ -396,3 +396,65 @@ def generate_followup_queries(initial_query: str, context_summary: str, llm_conf
     except Exception as e:
         print(f"[ERROR] Exception during follow-up query generation ({provider}): {e}")
         return [] # Return empty list on error
+
+
+def refine_text_section(section_content: str, instruction: str, llm_config: dict = {}) -> str:
+    """
+    Refines a given section of text based on a user-provided instruction using the specified LLM.
+
+    Args:
+        section_content (str): The text content (potentially HTML/Markdown) of the section to refine.
+        instruction (str): The user's instruction for refinement (e.g., "Summarize this", "Make it simpler").
+        llm_config (dict): Configuration for the LLM provider (provider, model_id, api_key, personality).
+
+    Returns:
+        str: The refined text content, or an error message starting with "Error:".
+    """
+    # Extract config with defaults
+    provider = llm_config.get("provider", "gemma")
+    model_id = llm_config.get("model_id")
+    api_key = llm_config.get("api_key")
+    personality = llm_config.get("personality") # Personality might influence refinement style
+
+    # Construct the prompt
+    # Instruct the LLM to maintain the original format (e.g., Markdown) if possible,
+    # unless the instruction implies a format change (like 'convert to bullet points').
+    prompt = (
+        f"You are tasked with refining a section of a document based on a specific instruction.\n"
+        f"User Instruction: \"{instruction}\"\n\n"
+        f"Original Section Content:\n\"\"\"\n{section_content}\n\"\"\"\n\n"
+        f"Please refine the original section content strictly according to the user's instruction. "
+        f"Try to maintain the original formatting (e.g., Markdown headings, lists) unless the instruction requires changing it. "
+        f"Output ONLY the refined section content. Do not include explanations, apologies, or introductions like 'Here is the refined section:'."
+    )
+
+    raw_output = ""
+    print(f"[INFO] Refining text section using {provider}...")
+    try:
+        if provider == "gemini":
+            if not model_id:
+                print("[ERROR] Gemini selected for refinement, but no model specified.")
+                return "Error: Gemini model not specified for refinement."
+            raw_output = call_gemini(prompt, model_name=model_id, gemini_api_key=api_key)
+        elif provider == "openrouter":
+            if not model_id:
+                print("[ERROR] OpenRouter selected for refinement, but no model specified.")
+                return "Error: OpenRouter model not specified for refinement."
+            raw_output = call_openrouter(prompt, model=model_id, personality=personality, openrouter_api_key=api_key)
+        else: # Default to gemma/ollama
+            if provider != "gemma":
+                print(f"[WARN] Unknown provider '{provider}' for refinement, defaulting to gemma.")
+            gemma_model = model_id or "gemma2:2b" # Example default
+            raw_output = call_gemma(prompt, model=gemma_model, personality=personality)
+
+        if not raw_output or raw_output.startswith("Error:"):
+            error_msg = raw_output if raw_output else "Error: Refinement failed (empty response)."
+            print(f"[WARN] Refinement failed or returned error: {error_msg}")
+            return error_msg # Return the error message
+
+        # Return the raw output, assuming the LLM followed the prompt
+        return raw_output.strip()
+
+    except Exception as e:
+        print(f"[ERROR] Exception during text refinement ({provider}): {e}")
+        return f"Error: Failed to refine text with {provider} - {e}"

@@ -146,6 +146,8 @@ class MainWindow(QMainWindow):
         # Connect cache controls (still handled locally/via controller)
         self.cache_enabled_checkbox.stateChanged.connect(self._handle_cache_enabled_change)
         self.clear_cache_button.clicked.connect(self.controller.clear_cache) # Connect clear button to controller
+        # Connect corpus clear button
+        self.corpus_clear_button.clicked.connect(self.clear_corpus_directory)
 
 
     # --- Slot Methods (Keep UI-specific handlers) ---
@@ -213,7 +215,27 @@ class MainWindow(QMainWindow):
             # Optionally update config immediately or let controller handle it before search
             # if 'corpus' not in self.config_data: self.config_data['corpus'] = {}
             # self.config_data['corpus']['path'] = directory
-            # save_config(self.config_path, self.config_data) # Consider if saving here is needed
+            # Optionally update config immediately or let controller handle it before search
+            # We will save it here for immediate effect
+            if 'corpus' not in self.config_data: self.config_data['corpus'] = {}
+            self.config_data['corpus']['path'] = directory
+            if save_config(self.config_path, self.config_data):
+                self.log_status(f"Corpus directory saved to {self.config_path}")
+            else:
+                self.log_status(f"[ERROR] Failed to save corpus directory to {self.config_path}")
+                QMessageBox.warning(self, "Config Error", f"Could not save corpus directory to {self.config_path}")
+
+    def clear_corpus_directory(self):
+        """Clear the selected corpus directory path."""
+        self.corpus_dir_label.setText("")
+        if 'corpus' not in self.config_data: self.config_data['corpus'] = {}
+        self.config_data['corpus']['path'] = "" # Set path to empty string
+        if save_config(self.config_path, self.config_data):
+            self.log_status("Corpus directory cleared and saved.")
+        else:
+            self.log_status(f"[ERROR] Failed to save cleared corpus directory to {self.config_path}")
+            QMessageBox.warning(self, "Config Error", f"Could not save cleared corpus directory to {self.config_path}")
+
 
     def handle_rag_model_change(self, model_name):
         """Show/hide model-specific and Personality options based on RAG model selection."""

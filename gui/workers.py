@@ -13,7 +13,10 @@ try:
     from llm_providers.gemini import list_gemini_models
     from llm_providers.openrouter import list_openrouter_models
     # Import task functions
-    from llm_providers.tasks import extract_topics_from_text, chain_of_thought_query_enhancement
+    from llm_providers.tasks import (
+        extract_topics_from_text, chain_of_thought_query_enhancement,
+        refine_text_section # Added refine_text_section
+    )
     from config_utils import load_config, save_config
 except ImportError as e:
     # This error might be better handled by the main application window
@@ -28,7 +31,8 @@ except ImportError as e:
 class SearchWorker(QThread):
     """Runs the SearchSession in a separate thread."""
     progress_updated = pyqtSignal(str)
-    search_complete = pyqtSignal(str) # Emits the report path
+    # Emits: report_path (str), final_answer_content (str), toc_tree_nodes (list)
+    search_complete = pyqtSignal(str, str, list)
     error_occurred = pyqtSignal(str)
 
     def __init__(self, params, parent=None):
@@ -201,7 +205,8 @@ class SearchWorker(QThread):
             self.progress_updated.emit("Saving final report...")
             output_path = session.save_report(final_answer)
             self.progress_updated.emit(f"Report saved: {output_path}")
-            self.search_complete.emit(output_path)
+            # Emit all necessary data: path, content, and toc nodes
+            self.search_complete.emit(output_path, final_answer, session.toc_tree)
 
         except ImportError as e:
              # Check for cancellation before reporting error
@@ -359,3 +364,43 @@ class OpenRouterFetcher(QThread):
             self.fetch_error.emit(f"Error fetching OpenRouter generative models: {e}")
 
 # Removed GeminiEmbeddingFetcher and OpenRouterEmbeddingFetcher classes
+
+
+class RefinementWorker(QThread):
+    """Refines a text section using an LLM in a separate thread."""
+    # Emits the original anchor ID and the refined content string
+    refinement_complete = pyqtSignal(str, str)
+    refinement_error = pyqtSignal(str, str) # Emits anchor ID and error message
+    status_update = pyqtSignal(str) # For status messages
+
+    def __init__(self, anchor_id, section_content, instruction, llm_config, parent=None):
+        super().__init__(parent)
+        self.anchor_id = anchor_id
+        self.section_content = section_content
+        self.instruction = instruction
+        self.llm_config = llm_config
+
+    def run(self):
+        """Executes the refinement task."""
+        try:
+            self.status_update.emit(f"Starting refinement for section '{self.anchor_id}'...")
+
+            # Call the refinement task function
+            refined_content = refine_text_section(
+                section_content=self.section_content,
+                instruction=self.instruction,
+                llm_config=self.llm_config
+            )
+
+            if refined_content.startswith("Error:"):
+                self.status_update.emit(f"[Error] Refinement failed for section '{self.anchor_id}'.")
+                self.refinement_error.emit(self.anchor_id, refined_content)
+            else:
+                self.status_update.emit(f"Refinement complete for section '{self.anchor_id}'.")
+                self.refinement_complete.emit(self.anchor_id, refined_content)
+
+        except Exception as e:
+            traceback.print_exc()
+            error_msg = f"An unexpected error occurred during refinement for section '{self.anchor_id}': {e}"
+            self.status_update.emit(f"[Error] {error_msg}")
+            self.refinement_error.emit(self.anchor_id, error_msg)

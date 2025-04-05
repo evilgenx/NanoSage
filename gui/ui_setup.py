@@ -9,10 +9,11 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox,
     QCheckBox, QGroupBox, QFormLayout, QScrollArea, QTreeWidgetItemIterator,
-    QSizePolicy, QProgressBar, QTabWidget, QApplication # Added QTabWidget and QApplication
+    QSizePolicy, QProgressBar, QTabWidget, QApplication, # Added QTabWidget and QApplication
+    QTreeView, QSplitter # Added QTreeView and QSplitter
 )
-from PyQt6.QtGui import QIcon # Import QIcon
-from PyQt6.QtCore import QSize # Import QSize for icon sizing
+from PyQt6.QtGui import QIcon, QStandardItemModel # Import QIcon, QStandardItemModel
+from PyQt6.QtCore import QSize, Qt # Import QSize for icon sizing, Qt for splitter orientation
 
 from gui.ui_components.searxng_selector import SearxngEngineSelector # Import the new widget
 # Note: MainWindow itself is passed in, so we don't import it directly
@@ -78,8 +79,13 @@ def setup_main_window_ui(main_window):
     # Add Icon for Browse
     browse_icon = QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_DirOpenIcon)
     main_window.corpus_dir_button.setIcon(browse_icon)
+    main_window.corpus_clear_button = QPushButton("Clear") # New Clear button
+    clear_icon = QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_DialogCancelButton) # Use a cancel/clear icon
+    main_window.corpus_clear_button.setIcon(clear_icon)
+    main_window.corpus_clear_button.setToolTip("Clear the selected corpus directory path") # Add tooltip
     corpus_layout.addWidget(main_window.corpus_dir_label)
     corpus_layout.addWidget(main_window.corpus_dir_button)
+    corpus_layout.addWidget(main_window.corpus_clear_button) # Add clear button to layout
     general_layout.addRow("Local Corpus:", corpus_layout)
 
     main_window.max_depth_spinbox = QSpinBox()
@@ -256,15 +262,41 @@ def setup_main_window_ui(main_window):
     right_layout.addWidget(status_group)
 
 
-    # Results
+    # Results Area (TOC and Content)
     results_group = QGroupBox("Results")
-    results_layout = QFormLayout()
-    results_layout.setContentsMargins(10, 10, 10, 10) # Margins inside results group
-    results_layout.setVerticalSpacing(8) # Space between rows
-    results_layout.setHorizontalSpacing(10) # Space between label/widget
-    main_window.report_path_label = QLabel("Report will appear here.")
-    main_window.report_path_label.setWordWrap(True)
-    main_window.report_path_label = QLabel("Report will appear here.")
+    results_main_layout = QVBoxLayout() # Use QVBoxLayout for the group box
+    results_main_layout.setContentsMargins(10, 10, 10, 10)
+    results_main_layout.setSpacing(8)
+
+    # Splitter for TOC and Results Text
+    main_window.results_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+    # TOC Tree Widget
+    main_window.toc_tree_widget = QTreeView()
+    main_window.toc_tree_widget.setHeaderHidden(True) # Hide the default header
+    main_window.toc_tree_widget.setModel(QStandardItemModel()) # Set an empty model initially
+    main_window.toc_tree_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+    main_window.results_splitter.addWidget(main_window.toc_tree_widget)
+
+    # Results Text Edit
+    main_window.results_text_edit = QTextEdit()
+    main_window.results_text_edit.setReadOnly(True)
+    main_window.results_text_edit.setPlaceholderText("Generated report content will appear here...")
+    main_window.results_text_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    main_window.results_splitter.addWidget(main_window.results_text_edit)
+
+    # Set initial splitter sizes (e.g., 1/4 for TOC, 3/4 for results)
+    main_window.results_splitter.setSizes([150, 450]) # Adjust initial sizes as needed
+
+    results_main_layout.addWidget(main_window.results_splitter) # Add splitter to the group layout
+
+    # Report Path and Action Buttons (below the splitter)
+    report_actions_layout = QFormLayout() # Use FormLayout for path label + buttons row
+    report_actions_layout.setContentsMargins(0, 5, 0, 0) # Add some top margin
+    report_actions_layout.setVerticalSpacing(8)
+    report_actions_layout.setHorizontalSpacing(10)
+
+    main_window.report_path_label = QLabel("Report path will appear here.")
     main_window.report_path_label.setWordWrap(True)
     main_window.open_report_button = QPushButton("Open Report")
     main_window.open_folder_button = QPushButton("Open Folder") # Shortened text
@@ -285,18 +317,20 @@ def setup_main_window_ui(main_window):
     main_window.open_folder_button.setEnabled(False)
     main_window.share_email_button.setEnabled(False) # Initially disabled
 
-    results_layout.addRow("Report Path:", main_window.report_path_label)
+    report_actions_layout.addRow("Report Path:", main_window.report_path_label)
     button_layout = QHBoxLayout()
     button_layout.setSpacing(8) # Space between result buttons
     button_layout.addWidget(main_window.open_report_button)
     button_layout.addWidget(main_window.open_folder_button)
     button_layout.addWidget(main_window.share_email_button) # Added email button to layout
-    results_layout.addRow(button_layout)
+    report_actions_layout.addRow(button_layout) # Add button row to the form layout
 
-    results_group.setLayout(results_layout)
-    right_layout.addWidget(results_group)
+    results_main_layout.addLayout(report_actions_layout) # Add the actions layout below the splitter
 
-    # --- Wrap Right Panel in Scroll Area ---
+    results_group.setLayout(results_main_layout) # Set the main layout for the group box
+    right_layout.addWidget(results_group) # Add the group box to the right panel
+
+    # --- Wrap Right Panel in Scroll Area --- # Keep this wrapping the whole right side
     right_scroll_area = QScrollArea()
     right_scroll_area.setWidget(right_panel)
     right_scroll_area.setWidgetResizable(True)

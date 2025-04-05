@@ -1,3 +1,4 @@
+import re # Added for anchor insertion
 from llm_providers.tasks import rag_final_answer
 import toc_tree
 from aggregator import aggregate_results
@@ -69,7 +70,82 @@ def build_final_answer(
         # Consider adding progress_callback to rag_final_answer if it's long
     )
     progress_callback("Final RAG generation complete.")
+
+    # --- Insert Anchors ---
+    if toc_tree_nodes:
+        progress_callback("Inserting anchors into final report...")
+        final_answer = _insert_anchors_into_report(final_answer, toc_tree_nodes)
+        progress_callback("Anchors inserted.")
+    # --- End Insert Anchors ---
+
     return final_answer
+
+def _insert_anchors_into_report(report_content, toc_nodes):
+    """
+    Post-processes the report content (Markdown string) to insert HTML anchors
+    based on the TOC nodes. Tries to find Markdown headings matching the node's query_text.
+    """
+    modified_content = report_content
+    nodes_to_process = list(toc_nodes) # Flatten the tree for easier iteration? No, need hierarchy for matching order.
+
+    processed_anchors = set() # Keep track of inserted anchors to avoid duplicates if query_text repeats
+
+    def find_and_insert(node, current_content):
+        nonlocal processed_anchors
+        if not node or not node.query_text or not node.anchor_id or node.anchor_id in processed_anchors:
+            return current_content
+
+        # Try to find the heading corresponding to the node's query_text
+        # Escape query text for regex and be flexible with surrounding whitespace/newlines
+        # Look for lines starting with # and containing the query text
+        # This is imperfect as LLM might rephrase.
+        escaped_query = re.escape(node.query_text.strip())
+        # Pattern: Start of line, 1+ hash marks, optional space, the query text, optional space, end of line.
+        # Using re.MULTILINE flag
+        pattern = re.compile(r"^(#+)\s*" + escaped_query + r"\s*$", re.MULTILINE | re.IGNORECASE)
+
+        match = pattern.search(current_content)
+        if match:
+            # Insert anchor before the matched heading line
+            # Use re.sub with count=1 to replace only the first occurrence found *after* previous insertions
+            # This is still tricky. Let's try replacing the first match globally for this anchor.
+            anchor_tag = f'<a name="{node.anchor_id}"></a>\n'
+            replacement = anchor_tag + match.group(0) # Prepend anchor tag with a newline
+
+            # Replace only the first occurrence of this specific heading match
+            try:
+                # Use a temporary placeholder to avoid re-matching issues if query text appears multiple times
+                placeholder = f"__ANCHOR_PLACEHOLDER_{node.anchor_id}__"
+                temp_content, num_replacements = pattern.subn(placeholder, current_content, count=1)
+                if num_replacements > 0:
+                    current_content = temp_content.replace(placeholder, replacement, 1)
+                    processed_anchors.add(node.anchor_id)
+                    print(f"[DEBUG] Inserted anchor '{node.anchor_id}' for heading: {node.query_text}")
+                else:
+                     print(f"[DEBUG] Could not insert anchor '{node.anchor_id}'. Heading not found for: {node.query_text}")
+
+            except Exception as e:
+                 print(f"[ERROR] Error inserting anchor {node.anchor_id}: {e}")
+                 # Continue with original content if replacement fails
+                 pass # Keep original current_content
+
+        else:
+             print(f"[DEBUG] Heading pattern not found for anchor '{node.anchor_id}': {node.query_text}")
+
+
+        # Process children recursively
+        for child in node.children:
+            # Pass the potentially modified content down
+            current_content = find_and_insert(child, current_content)
+
+        return current_content
+
+    # Process top-level nodes
+    for node in toc_nodes:
+        modified_content = find_and_insert(node, modified_content)
+
+    return modified_content
+
 
 def save_report(
     query_id,
