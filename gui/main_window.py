@@ -3,9 +3,9 @@
 
 import sys
 import os
-import subprocess # To open files/folders
-import webbrowser # Added for mailto link
-import urllib.parse # Added for URL encoding
+# import subprocess # Moved to result_actions
+# import webbrowser # Moved to result_actions
+# import urllib.parse # Moved to result_actions
 import logging # Added logging
 from PyQt6.QtWidgets import (
     QMainWindow, QTextEdit, QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox,
@@ -16,18 +16,9 @@ from PyQt6.QtWidgets import (
 
 # Import the new UI setup function
 from .ui_setup import setup_main_window_ui
-
-# Import worker threads using relative import
-try:
-    from .workers import (
-        SearchWorker, GeminiFetcher, OpenRouterFetcher, TopicExtractorWorker,
-        QueryEnhancerWorker # Added QueryEnhancerWorker
-        # Removed GeminiEmbeddingFetcher, OpenRouterEmbeddingFetcher as they are no longer used
-    )
-except ImportError as e:
-    print(f"Error importing workers in main_window.py: {e}")
-    # Handle appropriately, maybe raise or show error in GUI if possible later
-    sys.exit(1)
+# Import the new controller and result actions
+from .controller import GuiController
+from . import result_actions # Import the module
 
 # Import config loading utility
 from config_utils import load_config, save_config, DEFAULT_CONFIG # Added DEFAULT_CONFIG
@@ -48,21 +39,22 @@ class MainWindow(QMainWindow):
         self.config_path = "config.yaml" # Define config path
         self.config_data = load_config(self.config_path)
 
-        self.search_worker = None
-        self.topic_extractor_worker = None
-        self.query_enhancer_worker = None # Added worker instance variable
-        # Generative model fetchers
-        self.gemini_fetcher = None
-        self.openrouter_fetcher = None
-        # Embedding model fetchers removed as options are gone
-        # self.gemini_embedding_fetcher = None
-        # self.openrouter_embedding_fetcher = None
+        # Worker instances are now managed by the controller
+        # self.search_worker = None
+        # self.topic_extractor_worker = None
+        # self.query_enhancer_worker = None
+        # self.gemini_fetcher = None
+        # self.openrouter_fetcher = None
+
         self.current_report_path = None
         self.current_results_dir = None
-        self.cache_manager_instance = None # Added instance variable for cache manager
+        # self.cache_manager_instance = None # Cache manager interaction might move to controller too
 
         # Call the UI setup function from the separate module
         setup_main_window_ui(self)
+
+        # Instantiate the controller
+        self.controller = GuiController(self)
 
         # --- Set initial UI states based on loaded config ---
         # Search Provider
@@ -130,115 +122,39 @@ class MainWindow(QMainWindow):
     # _init_ui method is now removed
 
     def _connect_signals(self):
-        """Connect UI signals to slots."""
-        self.run_button.clicked.connect(self.start_search)
+        """Connect UI signals to slots in the controller or result actions."""
+        # Connect run button to controller's start method
+        self.run_button.clicked.connect(self.controller.start_search_process)
         self.corpus_dir_button.clicked.connect(self.select_corpus_directory)
-        # Connect device change signal
+        # Connect device change signal (still handled locally for UI updates)
         self.device_combo.currentTextChanged.connect(self.handle_device_change)
         # Connect RAG model change signal
         self.rag_model_combo.currentTextChanged.connect(self.handle_rag_model_change)
-        # Connect generative model fetch buttons
-        self.gemini_fetch_button.clicked.connect(self.fetch_gemini_models)
-        self.openrouter_fetch_button.clicked.connect(self.fetch_openrouter_models)
-        # Removed connections for embedding model fetch buttons
-        # self.gemini_embedding_fetch_button.clicked.connect(self.fetch_gemini_embedding_models)
-        # self.openrouter_embedding_fetch_button.clicked.connect(self.fetch_openrouter_embedding_models)
-        # Connect result buttons
-        self.open_report_button.clicked.connect(self.open_report)
-        self.open_folder_button.clicked.connect(self.open_results_folder)
-        self.share_email_button.clicked.connect(self.share_report_email) # Connect new button
-        # Connect search provider change signal to show/hide SearXNG options
+        # Connect generative model fetch buttons to controller
+        self.gemini_fetch_button.clicked.connect(self.controller.fetch_gemini_models)
+        self.openrouter_fetch_button.clicked.connect(self.controller.fetch_openrouter_models)
+        # Connect result buttons to result_actions functions (using lambda to pass state)
+        self.open_report_button.clicked.connect(lambda: result_actions.open_report(self.current_report_path, self.log_status))
+        self.open_folder_button.clicked.connect(lambda: result_actions.open_results_folder(self.current_results_dir, self.log_status))
+        self.share_email_button.clicked.connect(lambda: result_actions.share_report_email(self.current_report_path, self.log_status))
+        # Connect search provider change signal (still handled locally)
         self.search_provider_combo.currentTextChanged.connect(self.handle_search_provider_change)
-        # Connect the engine selector's signal
+        # Connect the engine selector's signal (still handled locally for config saving)
         self.searxng_engine_selector.selectionChanged.connect(self._handle_searxng_engine_selection_change)
-        # Connect cancel button
-        self.cancel_button.clicked.connect(self.cancel_search)
-        # Connect cache controls
+        # Connect cancel button to controller
+        self.cancel_button.clicked.connect(self.controller.cancel_current_operation)
+        # Connect cache controls (still handled locally/via controller)
         self.cache_enabled_checkbox.stateChanged.connect(self._handle_cache_enabled_change)
-        self.clear_cache_button.clicked.connect(self.clear_cache)
+        self.clear_cache_button.clicked.connect(self.controller.clear_cache) # Connect clear button to controller
 
 
-    # --- Slot Methods ---
+    # --- Slot Methods (Keep UI-specific handlers) ---
 
-    # --- Query Enhancement Slots ---
-    def on_enhanced_query_ready(self, enhanced_query_preview):
-        """Handles the signal when the enhanced query preview is ready."""
-        self.log_status(f"Enhanced Query Preview: {enhanced_query_preview}")
-        # IMPORTANT: Proceed with the search using the ORIGINAL query text
-        # that was present in the input box when the enhancement started.
-        original_query = self.query_input.toPlainText().strip() # Get original text again
-
-        if not original_query:
-             # This case should ideally be caught before starting the enhancer, but double-check
-             self.log_status("[Error] Original query is empty after enhancement preview. Aborting search.")
-             self.on_enhancement_error("Original query became empty.") # Treat as error
-             return
-
-        # Now, prepare parameters and start the actual SearchWorker
-        self.log_status("Proceeding with search using the original query...")
-        self._start_main_search_worker(original_query) # Pass original query to the search worker starter
-
-    def on_enhancement_error(self, error_message):
-        """Handles errors during query enhancement preview."""
-        self.log_status(f"Query Enhancement Preview Error: {error_message}")
-        QMessageBox.critical(self, "Query Enhancement Error", error_message)
-        # Reset UI state
-        self.run_button.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.cancel_button.setVisible(False)
-        self.cancel_button.setEnabled(False)
-        self.query_enhancer_worker = None # Clear worker reference
-
-    def on_enhancement_finished(self):
-        """Called when the query enhancement thread finishes (success or error)."""
-        # General cleanup if needed, though success/error slots might handle it.
-        if self.query_enhancer_worker: # Check if it finished normally
-            # UI state should be handled by success/error slots already
-            self.query_enhancer_worker = None
-
-    # --- Topic Extraction Slots ---
-
-    def on_topics_extracted(self, topics_string):
-        """Handles the signal when topics are successfully extracted."""
-        self.log_status("Topics extracted successfully.")
-        self.query_input.setPlainText(topics_string) # Populate input field
-        self.extract_topics_checkbox.setChecked(False) # Uncheck the box
-        # Re-enable run button, hide progress/cancel as extraction is done
-        self.run_button.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.cancel_button.setVisible(False)
-        self.cancel_button.setEnabled(False)
-        self.topic_extractor_worker = None # Clear worker reference
-        QMessageBox.information(self, "Topics Extracted", "Extracted topics have been placed in the query box.\nReview or edit them, then click 'Run Search' again to search using these topics.")
-
-    def on_topic_extraction_error(self, error_message):
-        """Handles errors during topic extraction."""
-        self.log_status(f"Topic Extraction Error: {error_message}")
-        QMessageBox.critical(self, "Topic Extraction Error", error_message)
-        # Reset UI state
-        self.run_button.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.cancel_button.setVisible(False)
-        self.cancel_button.setEnabled(False)
-        self.topic_extractor_worker = None # Clear worker reference
-        # Keep the checkbox checked so user knows it failed
-        # self.extract_topics_checkbox.setChecked(False)
-
-    def on_topic_extraction_finished(self):
-        """Called when the topic extraction thread finishes (success or error)."""
-        # This might not be strictly necessary if handled in success/error slots,
-        # but good for ensuring UI state is reset if worker finishes unexpectedly.
-        if self.topic_extractor_worker: # Check if it finished normally or was cleared already
-            # Reset UI only if enhancer isn't also running (unlikely scenario)
-            if not (self.query_enhancer_worker and self.query_enhancer_worker.isRunning()):
-                self.run_button.setEnabled(True)
-                self.progress_bar.setVisible(False)
-                self.cancel_button.setVisible(False)
-                self.cancel_button.setEnabled(False)
-            self.topic_extractor_worker = None
+    # Worker slots (on_*, fetch_*) are moved to GuiController
 
     def _handle_searxng_engine_selection_change(self, selected_engines):
         """Update the config when SearXNG engine selection changes."""
+        # This might also move to the controller if config handling is centralized there
         if 'search' not in self.config_data: self.config_data['search'] = {}
         if 'searxng' not in self.config_data['search']: self.config_data['search']['searxng'] = {}
 
@@ -286,10 +202,7 @@ class MainWindow(QMainWindow):
         #     ...
         else:
             # This case should ideally not be reached if only cpu/cuda are options
-            self.log_status(f"Warning: Unexpected embedding device selected: {device_name}")
-            self.embedding_model_combo.clear()
-            self.embedding_model_combo.setEnabled(False)
-            self.embedding_model_label.setText("Embedding Model:")
+                self.embedding_model_label.setText("Embedding Model:")
 
 
     def select_corpus_directory(self):
@@ -297,6 +210,10 @@ class MainWindow(QMainWindow):
         directory = QFileDialog.getExistingDirectory(self, "Select Corpus Directory")
         if directory:
             self.corpus_dir_label.setText(directory)
+            # Optionally update config immediately or let controller handle it before search
+            # if 'corpus' not in self.config_data: self.config_data['corpus'] = {}
+            # self.config_data['corpus']['path'] = directory
+            # save_config(self.config_path, self.config_data) # Consider if saving here is needed
 
     def handle_rag_model_change(self, model_name):
         """Show/hide model-specific and Personality options based on RAG model selection."""
@@ -329,156 +246,22 @@ class MainWindow(QMainWindow):
         self.personality_input.setVisible(is_rag_enabled)
 
 
-    # --- Generative Model Fetching Slots ---
+    # --- Generative Model Fetching Slots (Moved to Controller) ---
+    # def fetch_gemini_models(self): ...
+    # def on_gemini_models_fetched(self, models): ...
+    # def on_gemini_fetch_error(self, error_message): ...
+    # def fetch_openrouter_models(self): ...
+    # def on_openrouter_models_fetched(self, models): ...
+    # def on_openrouter_fetch_error(self, error_message): ...
 
-    def fetch_gemini_models(self):
-        """Start the GeminiFetcher thread for *generative* models."""
-        if self.gemini_fetcher and self.gemini_fetcher.isRunning():
-            self.log_status("Already fetching Gemini generative models...")
-            return
+    # --- Search Execution (Moved to Controller) ---
+    # def start_search(self): ...
+    # def _start_main_search_worker(self, query_to_use): ...
 
-        self.log_status("Attempting to fetch Gemini generative models (requires GEMINI_API_KEY)...")
-        self.gemini_fetch_button.setEnabled(False)
-        self.gemini_fetcher = GeminiFetcher(self)
-        self.gemini_fetcher.status_update.connect(self.log_status)
-        self.gemini_fetcher.models_fetched.connect(self.on_gemini_models_fetched)
-        self.gemini_fetcher.fetch_error.connect(self.on_gemini_fetch_error)
-        # Re-enable button only if combo is still empty after finish
-        self.gemini_fetcher.finished.connect(lambda: self.gemini_fetch_button.setEnabled(self.gemini_model_combo.count() == 0))
-        self.gemini_fetcher.start()
-
-    def on_gemini_models_fetched(self, models):
-        """Populate the Gemini *generative* model combo box."""
-        self.log_status(f"Successfully fetched {len(models)} Gemini generative models.")
-        self.gemini_model_combo.clear()
-        self.gemini_model_combo.addItems(models)
-        self.gemini_model_combo.setEnabled(True)
-        self.gemini_fetch_button.setEnabled(False) # Disable after successful fetch
-
-    def on_gemini_fetch_error(self, error_message):
-        """Show error message if Gemini *generative* fetch fails."""
-        self.log_status(f"Gemini Generative Fetch Error: {error_message}")
-        self.gemini_model_combo.clear()
-        self.gemini_model_combo.setEnabled(False)
-        self.gemini_fetch_button.setEnabled(True) # Re-enable on error
-
-    def fetch_openrouter_models(self):
-        """Start the OpenRouterFetcher thread for *generative* models."""
-        if self.openrouter_fetcher and self.openrouter_fetcher.isRunning():
-            self.log_status("Already fetching OpenRouter generative models...")
-            return
-
-        self.log_status("Attempting to fetch free OpenRouter generative models...")
-        self.openrouter_fetch_button.setEnabled(False)
-        self.openrouter_fetcher = OpenRouterFetcher(self)
-        self.openrouter_fetcher.status_update.connect(self.log_status)
-        self.openrouter_fetcher.models_fetched.connect(self.on_openrouter_models_fetched)
-        self.openrouter_fetcher.fetch_error.connect(self.on_openrouter_fetch_error)
-        # Re-enable button only if combo is still empty after finish
-        self.openrouter_fetcher.finished.connect(lambda: self.openrouter_fetch_button.setEnabled(self.openrouter_model_combo.count() == 0))
-        self.openrouter_fetcher.start()
-
-    def on_openrouter_models_fetched(self, models):
-        """Populate the OpenRouter *generative* model combo box."""
-        self.log_status(f"Successfully fetched {len(models)} free OpenRouter generative models.")
-        self.openrouter_model_combo.clear()
-        self.openrouter_model_combo.addItems(models)
-        self.openrouter_model_combo.setEnabled(True)
-        self.openrouter_fetch_button.setEnabled(False) # Disable after successful fetch
-
-    def on_openrouter_fetch_error(self, error_message):
-        """Show error message if OpenRouter *generative* fetch fails."""
-        self.log_status(f"OpenRouter Generative Fetch Error: {error_message}")
-        self.openrouter_model_combo.clear()
-        self.openrouter_model_combo.setEnabled(False)
-        self.openrouter_fetch_button.setEnabled(True) # Re-enable on error
-    # Removed slots related to fetching Gemini/OpenRouter embedding models
-    # --- Search Execution ---
-
-    def start_search(self):
-        """
-        Validate inputs and start the appropriate worker thread:
-        1. Topic Extraction (if checkbox checked)
-        2. Query Enhancement Preview (if checkbox unchecked)
-        3. Main Search (triggered after step 1 or 2 completes)
-        """
-        # --- Input Validation ---
-        # Check if any worker is running
-        if (self.search_worker and self.search_worker.isRunning()) or \
-           (self.topic_extractor_worker and self.topic_extractor_worker.isRunning()) or \
-           (self.query_enhancer_worker and self.query_enhancer_worker.isRunning()): # Added check for enhancer
-            self.log_status("An operation (search, topic extraction, or enhancement preview) is already in progress.")
-            return
-
-        query_or_text = self.query_input.toPlainText().strip()
-        if not query_or_text:
-            QMessageBox.warning(self, "Input Error", "Please enter text in the query box.")
-            return
-
-        # --- Shared Validation for LLM Tasks (Extraction & Enhancement) ---
-        # Both topic extraction and enhancement require a RAG model selection
-        rag_model_type = self.rag_model_combo.currentText()
-        selected_generative_gemini = None
-        selected_generative_openrouter = None
-
-        if rag_model_type == "None":
-            QMessageBox.warning(self, "Input Error", "Topic extraction or query enhancement preview requires a RAG model (Gemini, OpenRouter, or Gemma) to be selected.")
-            return
-        elif rag_model_type == "gemini":
-            if self.gemini_model_combo.count() == 0 or not self.gemini_model_combo.currentText():
-                QMessageBox.warning(self, "Input Error", f"{'Topic extraction' if self.extract_topics_checkbox.isChecked() else 'Query enhancement'} needs a Gemini generative model. Please fetch and select one.")
-                return
-            selected_generative_gemini = self.gemini_model_combo.currentText()
-        elif rag_model_type == "openrouter":
-            if self.openrouter_model_combo.count() == 0 or not self.openrouter_model_combo.currentText():
-                QMessageBox.warning(self, "Input Error", f"{'Topic extraction' if self.extract_topics_checkbox.isChecked() else 'Query enhancement'} needs an OpenRouter generative model. Please fetch and select one.")
-                return
-            selected_generative_openrouter = self.openrouter_model_combo.currentText()
-
-        # Prepare LLM config (used by both topic extractor and query enhancer)
-        llm_config = {
-            "provider": rag_model_type,
-            "model_id": selected_generative_gemini or selected_generative_openrouter, # Pass the specific model if applicable
-            "api_key": self.config_data.get('api_keys', {}).get(f'{rag_model_type}_api_key'), # Get relevant API key
-            "personality": self.personality_input.text() or None
-        }
-
-        # --- Action based on Checkbox State ---
-        if self.extract_topics_checkbox.isChecked():
-            # --- Start Topic Extractor Worker ---
-            self.log_status("Topic extraction requested...")
-            self.log_status("Starting topic extraction worker...")
-            self.run_button.setEnabled(False)
-            self.progress_bar.setVisible(True)
-            self.progress_bar.setRange(0, 0) # Indeterminate
-            # Note: Cancellation for topic extraction isn't implemented here, assumed quick.
-
-            self.topic_extractor_worker = TopicExtractorWorker(query_or_text, llm_config, self)
-            self.topic_extractor_worker.status_update.connect(self.log_status)
-            self.topic_extractor_worker.topics_extracted.connect(self.on_topics_extracted)
-            self.topic_extractor_worker.error_occurred.connect(self.on_topic_extraction_error)
-            self.topic_extractor_worker.finished.connect(self.on_topic_extraction_finished) # General cleanup
-            self.topic_extractor_worker.start()
-            # Stop here, wait for extraction to finish before user clicks Run again
-
-        else:
-            # --- Start Query Enhancement Preview Worker ---
-            self.log_status("Starting query enhancement preview...")
-            self.run_button.setEnabled(False)
-            self.progress_bar.setVisible(True)
-            self.progress_bar.setRange(0, 0) # Indeterminate
-            # Note: Cancellation for enhancement isn't implemented here, assumed quick.
-
-            self.query_enhancer_worker = QueryEnhancerWorker(query_or_text, llm_config, self)
-            self.query_enhancer_worker.status_update.connect(self.log_status)
-            self.query_enhancer_worker.enhanced_query_ready.connect(self.on_enhanced_query_ready) # Connect to new slot
-            self.query_enhancer_worker.enhancement_error.connect(self.on_enhancement_error) # Connect to new error slot
-            self.query_enhancer_worker.finished.connect(self.on_enhancement_finished) # General cleanup
-            self.query_enhancer_worker.start()
-            # Stop here, wait for enhancement preview to finish, which then triggers the search worker
-
+    # --- Cache Handling ---
     def _handle_cache_enabled_change(self, state):
         """Update config when cache enabled checkbox changes."""
+        # This logic remains here as it directly affects the config this window manages
         enabled = (state == 2) # 2 means checked
         if 'cache' not in self.config_data: self.config_data['cache'] = {}
         self.config_data['cache']['enabled'] = enabled
@@ -488,350 +271,26 @@ class MainWindow(QMainWindow):
             self.log_status(f"[ERROR] Failed to save cache setting to {self.config_path}")
             QMessageBox.warning(self, "Config Error", f"Could not save cache setting to {self.config_path}")
 
-    def clear_cache(self):
-        """Clears the cache database."""
-        # Get cache path from config
-        cache_db_path = self.config_data.get('cache', {}).get('db_path', DEFAULT_CONFIG['cache']['db_path'])
+    # clear_cache is now handled by the controller via button signal
 
-        reply = QMessageBox.question(self, 'Confirm Clear Cache',
-                                     f"Are you sure you want to delete the cache file?\n({cache_db_path})",
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                     QMessageBox.StandardButton.No)
-
-        if reply == QMessageBox.StandardButton.Yes:
-            self.log_status(f"Attempting to clear cache: {cache_db_path}")
-            try:
-                # Use a temporary CacheManager instance just for clearing
-                temp_cache_manager = CacheManager(cache_db_path)
-                temp_cache_manager.clear_all_cache() # This deletes and recreates
-                temp_cache_manager.close() # Close the connection
-                self.log_status("Cache cleared successfully.")
-                QMessageBox.information(self, "Cache Cleared", "The cache database has been cleared.")
-            except Exception as e:
-                error_msg = f"Failed to clear cache: {e}"
-                self.log_status(f"[ERROR] {error_msg}")
-                logging.exception("Error during cache clearing") # Log full traceback
-                QMessageBox.critical(self, "Cache Error", error_msg)
-
-
-    def _start_main_search_worker(self, query_to_use):
-        """
-        Internal method to prepare parameters and start the main SearchWorker.
-        This is called AFTER topic extraction (if used) or query enhancement preview.
-        """
-        self.log_status("Preparing to start main search worker...")
-
-        # --- Standard Search Input Validation (Run again before starting search) ---
-        # Embedding settings validation
-        embedding_device = self.device_combo.currentText()
-        embedding_model_name = self.embedding_model_combo.currentText()
-        if not embedding_model_name:
-             QMessageBox.warning(self, "Input Error", f"Please select an Embedding Model for the '{embedding_device}' device.")
-             self.run_button.setEnabled(True) # Re-enable button on validation fail
-             self.progress_bar.setVisible(False)
-             return
-        # RAG settings validation (only if RAG model is selected)
-        # Re-fetch RAG settings as they might have changed while preview was running
-        rag_model_type = self.rag_model_combo.currentText()
-        selected_generative_gemini = None
-        selected_generative_openrouter = None
-        if rag_model_type == "gemini":
-            if self.gemini_model_combo.count() == 0 or not self.gemini_model_combo.currentText():
-                 QMessageBox.warning(self, "Input Error", "RAG Model is Gemini, but no generative model selected. Please fetch and select one.")
-                 self.run_button.setEnabled(True) # Re-enable button on validation fail
-                 self.progress_bar.setVisible(False)
-                 return
-            selected_generative_gemini = self.gemini_model_combo.currentText()
-        elif rag_model_type == "openrouter":
-            if self.openrouter_model_combo.count() == 0 or not self.openrouter_model_combo.currentText():
-                 QMessageBox.warning(self, "Input Error", "RAG Model is OpenRouter, but no generative model selected. Please fetch and select one.")
-                 self.run_button.setEnabled(True) # Re-enable button on validation fail
-                 self.progress_bar.setVisible(False)
-                 return
-            selected_generative_openrouter = self.openrouter_model_combo.currentText()
-
-        # --- Save Current Config & Prepare Search Parameters ---
-        # Reload config data to ensure we have the latest state (e.g., cache enabled)
-        self.config_data = load_config(self.config_path)
-
-        # Update config_data with current UI settings before passing to worker
-        # General
-        if 'general' not in self.config_data: self.config_data['general'] = {}
-        self.config_data['general']['web_search'] = self.web_search_checkbox.isChecked()
-        self.config_data['general']['max_depth'] = self.max_depth_spinbox.value()
-        # Retrieval
-        if 'retrieval' not in self.config_data: self.config_data['retrieval'] = {}
-        self.config_data['retrieval']['top_k'] = self.top_k_spinbox.value()
-        self.config_data['retrieval']['embedding_model'] = embedding_model_name # Already validated
-        # Corpus
-        if 'corpus' not in self.config_data: self.config_data['corpus'] = {}
-        self.config_data['corpus']['path'] = self.corpus_dir_label.text() or None
-        # RAG
-        if 'llm' not in self.config_data: self.config_data['llm'] = {}
-        self.config_data['llm']['rag_model'] = rag_model_type if rag_model_type != "None" else None
-        self.config_data['llm']['personality'] = self.personality_input.text() or None
-        self.config_data['llm']['gemini_model_id'] = selected_generative_gemini
-        self.config_data['llm']['openrouter_model_id'] = selected_generative_openrouter
-        # Cache (already saved by signal, but ensure it's in config_data)
-        if 'cache' not in self.config_data: self.config_data['cache'] = {}
-        self.config_data['cache']['enabled'] = self.cache_enabled_checkbox.isChecked()
-
-        # Search Provider specific settings
-        selected_provider_text = self.search_provider_combo.currentText()
-        search_provider_key = 'duckduckgo' if selected_provider_text == "DuckDuckGo" else 'searxng'
-        search_config = self.config_data.setdefault('search', {})
-        search_config['provider'] = search_provider_key
-        search_config['enable_iterative_search'] = self.iterative_search_checkbox.isChecked() # Save iterative search state
-
-        searxng_config = search_config.setdefault('searxng', {})
-        ddg_config = search_config.setdefault('duckduckgo', {})
-
-        search_limit = 5 # Default
-        searxng_url = None
-        searxng_time_range = None
-        searxng_categories = None
-        searxng_engines = None
-
-        if search_provider_key == 'searxng':
-            searxng_url = self.searxng_base_url_input.text().strip() or None
-            searxng_time_range = self.searxng_time_range_input.text().strip() or None
-            searxng_categories = self.searxng_categories_input.text().strip() or None
-            searxng_engines = self.config_data.get('search', {}).get('searxng', {}).get('engines', []) # Read from config (updated by signal)
-            if not isinstance(searxng_engines, list): searxng_engines = []
-
-            searxng_config['base_url'] = searxng_url
-            searxng_config['time_range'] = searxng_time_range
-            searxng_config['categories'] = searxng_categories
-            # Engines are already saved by the signal handler
-
-            search_limit = searxng_config.get('max_results', 5)
-        else: # duckduckgo
-            search_limit = ddg_config.get('max_results', 5)
-
-        # Save the potentially modified config_data before starting the worker
-        if save_config(self.config_path, self.config_data):
-            self.log_status(f"Current settings saved to {self.config_path}")
-        else:
-            self.log_status(f"[ERROR] Failed to save configuration before starting search: {self.config_path}")
-            QMessageBox.warning(self, "Config Error", f"Could not save settings to {self.config_path}. Search may use outdated settings.")
-            # Decide whether to proceed or stop if saving fails
-            # return # Uncomment to stop if saving fails
-
-        # --- Prepare All Parameters for Search Worker ---
-        search_params = {
-            "query": query_to_use, # Use the query passed to this method
-            "corpus_dir": self.corpus_dir_label.text() or None,
-            "web_search": self.web_search_checkbox.isChecked(),
-            "enable_iterative_search": self.iterative_search_checkbox.isChecked(),
-            "max_depth": self.max_depth_spinbox.value(),
-            "top_k": self.top_k_spinbox.value(),
-            "device": embedding_device,
-            "embedding_model_name": embedding_model_name,
-            "rag_model": rag_model_type if rag_model_type != "None" else None,
-            "personality": self.personality_input.text() or None,
-            "selected_gemini_model": selected_generative_gemini,
-            "selected_openrouter_model": selected_generative_openrouter,
-            # Search settings
-            "search_provider": search_provider_key,
-            "search_limit": search_limit,
-            "searxng_url": searxng_url,
-            "searxng_time_range": searxng_time_range,
-            "searxng_categories": searxng_categories,
-            "searxng_engines": searxng_engines,
-            "config_path": self.config_path,
-            # Add selected output format
-            "output_format": self.output_format_combo.currentText()
-        }
-
-        # --- Start Search Worker ---
-        self.log_status("Starting main search worker...")
-        # Ensure Run button is disabled (might have been re-enabled by error handlers)
-        self.run_button.setEnabled(False)
-        self.open_report_button.setEnabled(False)
-        self.open_folder_button.setEnabled(False)
-        self.share_email_button.setEnabled(False)
-        self.report_path_label.setText("Running Search...")
-        self.current_report_path = None
-        self.current_results_dir = None
-
-        # Ensure progress bar and cancel button are visible/enabled for the main search
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0) # Indeterminate
-        self.cancel_button.setVisible(True)
-        self.cancel_button.setEnabled(True)
-
-        # Ensure search provider visibility is correct before starting
-        self.handle_search_provider_change(self.search_provider_combo.currentText())
-
-        self.search_worker = SearchWorker(search_params, self)
-        self.search_worker.progress_updated.connect(self.log_status)
-        self.search_worker.search_complete.connect(self.on_search_complete)
-        self.search_worker.error_occurred.connect(self.on_search_error)
-        self.search_worker.finished.connect(self.on_search_finished)
-        self.search_worker.start()
-
+    # _start_main_search_worker is moved to GuiController
 
     # --- Utility & Result Handling ---
 
-    # Optional: Method to save config changes (e.g., when provider changes)
-    # def handle_search_provider_change(self, provider_text):
-    #     """Update config data when search provider changes."""
-    #     provider_key = 'duckduckgo' if provider_text == "DuckDuckGo" else 'searxng'
-    #     if 'search' not in self.config_data:
-    #         self.config_data['search'] = {}
-    #     self.config_data['search']['provider'] = provider_key
-    #     self.save_current_config()
-
-    # def save_current_config(self):
-    #     """Save the current state of self.config_data to the file."""
-    #     if save_config(self.config_path, self.config_data):
-    #         self.log_status(f"Configuration saved to {self.config_path}")
-    #     else:
-    #         self.log_status(f"[ERROR] Failed to save configuration to {self.config_path}")
-
+    # log_status remains here as it directly interacts with the UI element
     def log_status(self, message):
         """Append a message to the status log."""
         self.status_log.append(message)
         self.status_log.verticalScrollBar().setValue(self.status_log.verticalScrollBar().maximum()) # Auto-scroll
 
-    def on_search_complete(self, report_path):
-        """Handle successful search completion."""
-        self.log_status(f"Search finished successfully!")
-        self.current_report_path = report_path
-        self.current_results_dir = os.path.dirname(report_path)
-        self.report_path_label.setText(report_path)
-        self.open_report_button.setEnabled(True)
-        self.open_folder_button.setEnabled(True)
-        self.share_email_button.setEnabled(True) # Enable email button on completion
+    # Search result slots (on_search_complete/error/finished) are moved to GuiController
 
-    def on_search_error(self, error_message):
-        """Show error message if search fails."""
-        self.log_status(f"Search Error: {error_message}")
-        QMessageBox.critical(self, "Search Error", error_message)
-        self.report_path_label.setText("Search failed.")
+    # cancel_search is moved to GuiController
 
-
-    def on_search_finished(self):
-        """Called when the SearchWorker thread finishes (success or error)."""
-        # This is only for the SearchWorker, not the TopicExtractorWorker
-        self.run_button.setEnabled(True)
-        self.search_worker = None # Clear worker reference
-        if not self.current_report_path: # Check if search actually completed successfully
-            self.open_report_button.setEnabled(False)
-            self.open_folder_button.setEnabled(False)
-            self.share_email_button.setEnabled(False)
-
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setRange(0, 100) # Reset range
-        self.cancel_button.setVisible(False)
-        self.cancel_button.setEnabled(False)
-
-    def cancel_search(self):
-        """Requests cancellation of the currently running SearchWorker."""
-        # Note: Cancellation for TopicExtractorWorker is not implemented
-        if self.search_worker and self.search_worker.isRunning():
-            self.log_status("Requesting search cancellation...")
-            self.search_worker.request_cancellation()
-            self.cancel_button.setEnabled(False) # Correctly indented now
-            self.log_status("Cancellation requested. Waiting for search worker to stop...") # Correctly indented now
-        # Add checks for other workers (though they are short-lived)
-        elif self.topic_extractor_worker and self.topic_extractor_worker.isRunning():
-            self.log_status("Topic extraction is running. Cancellation not implemented for this step.")
-            # self.topic_extractor_worker.terminate() # Avoid terminate if possible
-        elif self.query_enhancer_worker and self.query_enhancer_worker.isRunning():
-             self.log_status("Query enhancement preview is running. Cancellation not implemented for this step.")
-             # self.query_enhancer_worker.terminate() # Avoid terminate if possible
-        else:
-            self.log_status("No cancellable operation running.")
-
-    def open_report(self):
-        """Open the generated report file using the default system viewer."""
-        if self.current_report_path and os.path.exists(self.current_report_path):
-            try:
-                if sys.platform == "win32":
-                    os.startfile(self.current_report_path)
-                elif sys.platform == "darwin": # macOS
-                    subprocess.run(["open", self.current_report_path], check=True)
-                else: # Linux and other Unix-like
-                    subprocess.run(["xdg-open", self.current_report_path], check=True)
-                self.log_status(f"Attempting to open report: {self.current_report_path}")
-            except Exception as e:
-                self.log_status(f"Error opening report: {e}")
-                QMessageBox.warning(self, "Open Error", f"Could not open the report file:\n{e}")
-        else:
-            QMessageBox.warning(self, "File Not Found", "The report file does not exist or path is not set.")
-
-    def open_results_folder(self):
-        """Open the folder containing the results."""
-        if self.current_results_dir and os.path.exists(self.current_results_dir):
-            try:
-                if sys.platform == "win32":
-                     # Use explorer for Windows, safer for paths with spaces
-                     subprocess.run(['explorer', self.current_results_dir])
-                elif sys.platform == "darwin": # macOS
-                    subprocess.run(["open", self.current_results_dir], check=True)
-                else: # Linux and other Unix-like
-                    subprocess.run(["xdg-open", self.current_results_dir], check=True)
-                self.log_status(f"Attempting to open results folder: {self.current_results_dir}")
-            except Exception as e:
-                self.log_status(f"Error opening results folder: {e}")
-                QMessageBox.warning(self, "Open Error", f"Could not open the results folder:\n{e}")
-        else:
-             QMessageBox.warning(self, "Folder Not Found", "The results directory does not exist or path is not set.")
-
-    def share_report_email(self):
-        """Open the default email client with a pre-filled message."""
-        if self.current_report_path and os.path.exists(self.current_report_path):
-            try:
-                subject = "NanoSage Research Report"
-                body = (
-                    f"Please find the research report attached.\n\n"
-                    f"You can find the file at:\n{self.current_report_path}\n\n"
-                    f"(Please attach the file manually before sending)"
-                )
-                # URL encode subject and body
-                encoded_subject = urllib.parse.quote(subject)
-                encoded_body = urllib.parse.quote(body)
-
-                mailto_url = f"mailto:?subject={encoded_subject}&body={encoded_body}"
-
-                webbrowser.open(mailto_url)
-                self.log_status(f"Attempting to open email client for report: {self.current_report_path}")
-            except Exception as e:
-                self.log_status(f"Error opening email client: {e}")
-                QMessageBox.warning(self, "Email Error", f"Could not open the email client:\n{e}")
-        else:
-            QMessageBox.warning(self, "File Not Found", "The report file does not exist or path is not set. Cannot share.")
-
+    # Result action methods (open_report, open_results_folder, share_report_email) are moved to result_actions.py
 
     def closeEvent(self, event):
-        """Ensure threads are stopped on close."""
-        # Stop SearchWorker if running
-        if self.search_worker and self.search_worker.isRunning():
-             self.log_status("Attempting to cancel search on close...")
-             self.search_worker.request_cancellation()
-             self.search_worker.wait(5000) # Wait up to 5 seconds
-             if self.search_worker.isRunning():
-                 self.log_status("Search worker did not stop gracefully, terminating...")
-                 self.search_worker.terminate()
-        # Stop TopicExtractorWorker if running
-        if self.topic_extractor_worker and self.topic_extractor_worker.isRunning():
-             self.log_status("Terminating topic extraction on close...")
-             self.topic_extractor_worker.terminate()
-             self.topic_extractor_worker.wait()
-        # Stop QueryEnhancerWorker if running
-        if self.query_enhancer_worker and self.query_enhancer_worker.isRunning():
-             self.log_status("Terminating query enhancement on close...")
-             self.query_enhancer_worker.terminate()
-             self.query_enhancer_worker.wait()
-        # Stop generative fetchers
-        if self.gemini_fetcher and self.gemini_fetcher.isRunning():
-             self.log_status("Terminating Gemini fetcher on close...")
-             self.gemini_fetcher.terminate()
-             self.gemini_fetcher.wait()
-        if self.openrouter_fetcher and self.openrouter_fetcher.isRunning():
-             self.log_status("Terminating OpenRouter fetcher on close...")
-             self.openrouter_fetcher.terminate()
-             self.openrouter_fetcher.wait()
-        # Removed termination for embedding fetchers
+        """Ensure threads are stopped on close by notifying the controller."""
+        if self.controller:
+            self.controller.shutdown_workers()
         event.accept()
