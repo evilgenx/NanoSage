@@ -1,11 +1,16 @@
 # llm_providers/tasks.py
 import time # Needed for summarize_text chunking delay (optional)
+import logging # Added logging
+from typing import Optional, Dict, Any # Added Optional, Dict, Any
+from cache_manager import CacheManager # Added CacheManager import
 
 # Import functions from the new provider modules and utils
 from .gemini import call_gemini
 from .openrouter import call_openrouter
 from .ollama import call_gemma
 from .utils import extract_final_query
+
+logger = logging.getLogger(__name__) # Added logger
 
 # Modified to accept llm_config dictionary
 def chain_of_thought_query_enhancement(query, llm_config: dict = {}):
@@ -115,75 +120,151 @@ def extract_topics_from_text(text: str, llm_config: dict = {}, max_topics=5) -> 
         return f"Error: Failed to extract topics with {provider} - {e}"
 
 
-# Modified summarize_text to accept llm_config dictionary (reordered params)
-def summarize_text(text, llm_config: dict = {}, max_chars=6000):
-    """Summarizes text, potentially chunking, using the specified RAG model configured in llm_config."""
+# Modified summarize_text to accept llm_config dictionary and cache_manager
+def summarize_text(text: str, llm_config: Dict[str, Any] = {}, max_chars: int = 6000, cache_manager: Optional[CacheManager] = None) -> str:
+    """Summarizes text, potentially chunking, using the specified RAG model configured in llm_config, with caching."""
 
-    # Extract config once for the helper function
+    if not text or not text.strip():
+        logger.warning("Attempted to summarize empty text.")
+        return "" # Return empty string for empty input
+
+    # --- Prepare Cacheable Config ---
+    # Extract relevant keys that affect summary output for hashing
     provider = llm_config.get("provider", "gemma")
     model_id = llm_config.get("model_id")
-    api_key = llm_config.get("api_key")
     personality = llm_config.get("personality")
+    # Add other relevant keys if they influence the summary prompt/output significantly
+    cacheable_config = {
+        'provider': provider,
+        'model_id': model_id,
+        'personality': personality,
+        'task': 'summarize' # Add task type to differentiate from other potential uses
+    }
+    # --- End Prepare Cacheable Config ---
 
-    def _call_selected_model(prompt_text):
+    # --- Cache Check for Full Text ---
+    if cache_manager:
+        cached_summary = cache_manager.get_summary(text, cacheable_config)
+        if cached_summary is not None:
+            return cached_summary
+    # --- End Cache Check for Full Text ---
+
+    # --- Internal LLM Call Helper ---
+    def _call_selected_model(prompt_text: str) -> str:
         """Internal helper to call the correct model based on pre-extracted config."""
+        # Note: This helper doesn't handle caching itself, caching is done around its calls.
         try:
             if provider == "gemini":
                 if not model_id:
-                    print("[ERROR] Gemini selected for summarization, but no model specified.")
+                    logger.error("Gemini selected for summarization, but no model specified.")
                     return "Error: Gemini model not specified for summarization."
-                return call_gemini(prompt_text, model_name=model_id, gemini_api_key=api_key)
+                # Assuming call_gemini takes api_key from llm_config if needed
+                return call_gemini(prompt_text, model_name=model_id, gemini_api_key=llm_config.get("api_key"))
             elif provider == "openrouter":
                 if not model_id:
-                    print("[ERROR] OpenRouter selected for summarization, but no model specified.")
+                    logger.error("OpenRouter selected for summarization, but no model specified.")
                     return "Error: OpenRouter model not specified for summarization."
-                return call_openrouter(prompt_text, model=model_id, personality=personality, openrouter_api_key=api_key)
+                return call_openrouter(prompt_text, model=model_id, personality=personality, openrouter_api_key=llm_config.get("api_key"))
             else: # Default to gemma/ollama
                 if provider != "gemma":
-                     print(f"[WARN] Unknown provider '{provider}' for summarization, defaulting to gemma.")
+                     logger.warning(f"Unknown provider '{provider}' for summarization, defaulting to gemma.")
                 gemma_model = model_id or "gemma2:2b" # Example default
                 return call_gemma(prompt_text, model=gemma_model, personality=personality)
         except Exception as e:
-            print(f"[ERROR] Exception during _call_selected_model ({provider}): {e}")
+            logger.error(f"Exception during _call_selected_model ({provider}): {e}", exc_info=True)
             return f"Error: Failed to call {provider} model - {e}"
+    # --- End Internal LLM Call Helper ---
 
 
-    if not text or not text.strip():
-        print("[WARN] Attempted to summarize empty text.")
-        return "" # Return empty string for empty input
-
+    # --- Handle Text <= Max Chars ---
     if len(text) <= max_chars:
+        logger.debug(f"Summarizing text (<= {max_chars} chars) using {provider}...")
         prompt = f"Please summarize the following text succinctly:\n\n{text}"
         summary = _call_selected_model(prompt)
-        # Return summary, even if it's an error message from the LLM call
-        return summary if summary else "Error: Summarization failed (empty response)."
 
-    # If text is longer than max_chars, chunk it
+        # Store in cache if successful
+        if summary and not summary.startswith("Error:") and cache_manager:
+            cache_manager.store_summary(text, cacheable_config, summary)
+
+        return summary if summary else "Error: Summarization failed (empty response)."
+    # --- End Handle Text <= Max Chars ---
+
+
+    # --- Handle Text > Max Chars (Chunking) ---
     chunks = [text[i:i+max_chars] for i in range(0, len(text), max_chars)]
     summaries = []
-    print(f"[INFO] Summarizing text in {len(chunks)} chunks using {provider}...")
+    logger.info(f"Summarizing text in {len(chunks)} chunks using {provider}...")
+
+    # Prepare cache config specific to chunk summarization (might differ slightly if needed)
+    chunk_cacheable_config = cacheable_config.copy()
+    chunk_cacheable_config['task'] = 'summarize_chunk'
+
     for i, chunk in enumerate(chunks):
-        prompt = f"Summarize part {i+1}/{len(chunks)}:\n\n{chunk}"
-        summary = _call_selected_model(prompt)
-        if not summary or summary.startswith("Error:"): # Propagate errors or handle empty summaries
-            error_msg = summary if summary else "Error: Summarization failed for chunk (empty response)."
-            print(f"[ERROR] Failed to summarize chunk {i+1}/{len(chunks)}: {error_msg}")
-            return error_msg # Return the error immediately
+        # --- Cache Check for Chunk ---
+        cached_chunk_summary = None
+        if cache_manager:
+            cached_chunk_summary = cache_manager.get_summary(chunk, chunk_cacheable_config)
+
+        if cached_chunk_summary is not None:
+            summary = cached_chunk_summary
+            logger.debug(f"Cache hit for summary chunk {i+1}/{len(chunks)}")
+        else:
+            # --- Generate Chunk Summary (Cache Miss) ---
+            logger.debug(f"Summarizing chunk {i+1}/{len(chunks)} (cache miss)...")
+            prompt = f"Summarize part {i+1}/{len(chunks)}:\n\n{chunk}"
+            summary = _call_selected_model(prompt)
+
+            if not summary or summary.startswith("Error:"): # Propagate errors or handle empty summaries
+                error_msg = summary if summary else "Error: Summarization failed for chunk (empty response)."
+                logger.error(f"Failed to summarize chunk {i+1}/{len(chunks)}: {error_msg}")
+                return error_msg # Return the error immediately
+
+            # --- Store Chunk Summary in Cache ---
+            if cache_manager:
+                cache_manager.store_summary(chunk, chunk_cacheable_config, summary)
+            # --- End Store Chunk Summary ---
+
         summaries.append(summary)
         # Optional: Add delay only if needed, maybe make configurable
-        # time.sleep(1) # Consider if rate limits are hit without this
+        # time.sleep(0.5) # Consider if rate limits are hit without this
 
     combined = "\n".join(summaries)
-    # Check if combined summary still needs further summarization
+
+    # --- Handle Combined Summary ---
     if len(combined) > max_chars:
-        print(f"[INFO] Combining {len(summaries)} summaries into a final summary using {provider}...")
-        prompt = f"Combine these summaries into one concise final summary:\n\n{combined}"
-        final_summary = _call_selected_model(prompt)
-        # Return final summary, even if it's an error message
-        return final_summary if final_summary else "Error: Final combination summarization failed (empty response)."
+        # Prepare cache config specific to combined summarization
+        combine_cacheable_config = cacheable_config.copy()
+        combine_cacheable_config['task'] = 'summarize_combined'
+
+        # --- Cache Check for Combined Summary ---
+        cached_final_summary = None
+        if cache_manager:
+            # Use 'combined' text as the key for the final summary cache
+            cached_final_summary = cache_manager.get_summary(combined, combine_cacheable_config)
+
+        if cached_final_summary is not None:
+            logger.debug("Cache hit for final combined summary.")
+            return cached_final_summary
+        else:
+            # --- Generate Final Combined Summary (Cache Miss) ---
+            logger.info(f"Combining {len(summaries)} summaries into a final summary using {provider} (cache miss)...")
+            prompt = f"Combine these summaries into one concise final summary:\n\n{combined}"
+            final_summary = _call_selected_model(prompt)
+
+            # --- Store Final Combined Summary in Cache ---
+            if final_summary and not final_summary.startswith("Error:") and cache_manager:
+                # Use 'combined' text as the key
+                cache_manager.store_summary(combined, combine_cacheable_config, final_summary)
+            # --- End Store Final Combined Summary ---
+
+            return final_summary if final_summary else "Error: Final combination summarization failed (empty response)."
     else:
-        # If combined summary is within limits, return it directly
+        # If combined summary is within limits, it means the chunk summaries were already short enough.
+        # We already cached the individual chunks. We could potentially cache the combined result here too,
+        # using the original full text as the key, but it might be redundant if the full text check passed initially.
+        # For simplicity, just return the combined text.
         return combined
+    # --- End Handle Combined Summary ---
 
 
 # Modified rag_final_answer to accept llm_config dictionary

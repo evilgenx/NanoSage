@@ -5,11 +5,13 @@ import asyncio
 import yaml
 import os
 import sys # Import sys for exiting
+import logging # Added for logging
 
 # Import SearchSession and related functions
 from search_session import SearchSession
 from llm_providers.gemini import list_gemini_models # Import from the new provider file
-from config_utils import load_config # Import from the new utility file
+from config_utils import load_config, DEFAULT_CONFIG # Import from the new utility file
+from cache_manager import CacheManager # Added CacheManager import
 
 # Conditional GUI imports
 GUI_ENABLED = True
@@ -47,7 +49,14 @@ def main():
     parser.add_argument("--search_max_results", type=int, default=None, help="Number of search results to fetch")
     # GUI Argument
     parser.add_argument("--gui", action="store_true", help="Launch the graphical user interface") # Add GUI flag
+    parser.add_argument('--clear-cache', action='store_true', help='Clear the cache database before running.') # Added clear-cache flag
+    parser.add_argument('--log-level', type=str, default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'], help='Set the logging level.') # Added log level arg
     args = parser.parse_args()
+
+    # --- Setup Logging ---
+    log_level = getattr(logging, args.log_level.upper(), logging.INFO)
+    logging.basicConfig(level=log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__) # Get logger for main
 
     # --- GUI Mode ---
     if args.gui:
@@ -85,46 +94,10 @@ def main():
         parser.error("--query is required when not using --gui")
 
     # --- Load Config and Resolve Settings ---
+    # Use the load_config function which now merges with defaults
     config = load_config(args.config)
-
-    # Define defaults matching config.yaml structure
-    defaults = {
-        'general': {
-            'corpus_dir': None,
-            'device': 'cpu',
-            'max_depth': 1,
-            'web_search': False,
-        },
-        'retrieval': {
-            'embedding_model': 'colpali', # Changed from retrieval_model
-            'top_k': 3,
-        },
-        'llm': {
-            'rag_model': 'gemma',
-            'personality': None,
-            'gemma_model_id': 'gemma2:2b',
-            'gemini_model_id': 'models/gemini-1.5-flash-latest',
-            'openrouter_model_id': 'openai/gpt-3.5-turbo',
-        },
-        'api_keys': {
-            'gemini_api_key': None,
-            'openrouter_api_key': None,
-        },
-        'search': { # Added search defaults
-            'provider': 'duckduckgo',
-            'duckduckgo': {
-                'max_results': 5,
-            },
-            'searxng': {
-                'base_url': None,
-                'max_results': 5,
-                # 'api_key': None # Optional
-            }
-        },
-        # Optional sections - add if needed
-        # 'embeddings': { ... },
-        # 'advanced': { ... }
-    }
+    # Defaults are now handled within load_config, but we might still need DEFAULT_CONFIG for reference if needed elsewhere
+    defaults = DEFAULT_CONFIG # Use the imported defaults
 
     # Helper to safely get nested config values
     def get_config_value(cfg, keys, default=None):
@@ -161,7 +134,13 @@ def main():
         'search_provider': args.search_provider if args.search_provider is not None else get_config_value(config, ['search', 'provider'], defaults['search']['provider']),
         'searxng_url': args.searxng_url if args.searxng_url is not None else get_config_value(config, ['search', 'searxng', 'base_url'], defaults['search']['searxng']['base_url']),
         # Resolve max_results based on the chosen provider
-        'search_max_results': args.search_max_results if args.search_max_results is not None else None # Placeholder, resolved below
+        'search_max_results': args.search_max_results if args.search_max_results is not None else None, # Placeholder, resolved below
+
+        # Add cache settings resolution (CLI overrides config)
+        'cache': {
+             'enabled': get_config_value(config, ['cache', 'enabled'], defaults['cache']['enabled']),
+             'db_path': get_config_value(config, ['cache', 'db_path'], defaults['cache']['db_path'])
+        }
     }
 
     # Resolve search_max_results based on the selected provider
@@ -230,20 +209,57 @@ def main():
          print(f"[INFO] Using Gemma/Ollama model: {resolved['gemma_model_id']}")
 
 
-    # --- Instantiate SearchSession with resolved settings ---
-    session = SearchSession(
-        query=args.query,
-        config=config, # Pass raw config for potential use in saving/reporting
-        resolved_settings=resolved # Pass the dictionary of resolved settings
-        # progress_callback can be added here if needed for CLI mode
-    )
+    # --- Initialize Cache Manager ---
+    cache_manager = None
+    cache_config = resolved.get('cache', {}) # Get cache settings from resolved dict
+    if cache_config.get('enabled', False):
+        db_path = cache_config.get('db_path', 'cache/nanosage_cache.db')
+        try:
+            cache_manager = CacheManager(db_path)
+            if args.clear_cache:
+                logger.info("Clearing cache as requested by --clear-cache flag.")
+                cache_manager.clear_all_cache() # This handles closing/reopening connection
+        except Exception as e:
+             logger.error(f"Failed to initialize cache manager at {db_path}: {e}. Caching disabled.")
+             cache_manager = None # Ensure it's None if init fails
+    else:
+        logger.info("Caching is disabled in configuration.")
 
-    loop = asyncio.get_event_loop() # Deprecated in newer Python, consider asyncio.run()
-    final_answer = loop.run_until_complete(session.run_session())
 
-    # Save final report
-    output_path = session.save_report(final_answer)
-    print(f"[INFO] Final report saved to: {output_path}")
+    # --- Instantiate SearchSession with resolved settings and cache manager ---
+    try:
+        session = SearchSession(
+            query=args.query,
+            # config=config, # Pass raw config if needed by session, otherwise resolved_settings is better
+            resolved_settings=resolved, # Pass the dictionary of resolved settings
+            cache_manager=cache_manager # Pass the cache manager instance
+            # progress_callback can be added here if needed for CLI mode
+        )
+
+        # --- Run Session ---
+        # Use asyncio.run() for modern Python async handling
+        if sys.version_info >= (3, 7):
+            final_answer = asyncio.run(session.run_session())
+        else:
+            # Fallback for older Python versions (though 3.8+ is recommended by README)
+            loop = asyncio.get_event_loop()
+            final_answer = loop.run_until_complete(session.run_session())
+
+
+        # --- Save Report ---
+        if final_answer:
+            output_path = session.save_report(final_answer)
+            logger.info(f"Final report saved to: {output_path}")
+        else:
+            logger.warning("Session finished but no final answer was generated.")
+
+    except Exception as e:
+        logger.critical(f"An unexpected error occurred during the session: {e}", exc_info=True)
+        # Optionally add more specific error handling
+    finally:
+        # --- Close Cache Connection ---
+        if cache_manager:
+            cache_manager.close()
 
 
 if __name__ == "__main__":

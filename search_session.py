@@ -25,21 +25,26 @@ from search_logic import web_recursive, subquery as subquery_logic, summarizatio
 # TOC tracking, and relevance scoring.
 #########################################################
 
+from typing import Optional # Added for type hinting
+from cache_manager import CacheManager # Added import
+
 class SearchSession:
-    # Modified __init__ to accept resolved_settings dictionary
-    def __init__(self, query, config, resolved_settings, progress_callback=None):
+    # Modified __init__ to accept resolved_settings dictionary and cache_manager
+    def __init__(self, query, resolved_settings, config=None, progress_callback=None, cache_manager: Optional[CacheManager] = None): # Added cache_manager
         """
         Initializes the SearchSession.
 
         :param query: The initial user query.
-        :param config: The raw configuration dictionary (from YAML).
         :param resolved_settings: A dictionary containing the final settings after considering CLI args, config file, and defaults.
+        :param config: The raw configuration dictionary (from YAML). Optional.
         :param progress_callback: Optional function to call with status updates.
+        :param cache_manager: Optional instance of CacheManager.
         """
         self.query = query
-        self.config = config # Keep raw config if needed elsewhere (e.g., save_report)
+        self.config = config or {} # Store raw config if provided, else empty dict
         self.resolved_settings = resolved_settings # Store the resolved settings
         self.progress_callback = progress_callback or (lambda msg: None)
+        self.cache_manager = cache_manager # Store the cache manager instance
 
         # --- Use resolved_settings for initialization ---
         self.query_id = str(uuid.uuid4())[:8]
@@ -67,7 +72,8 @@ class SearchSession:
             self.progress_callback(f"Creating embedder for model='{self.resolved_settings['embedding_model']}' on device='{self.resolved_settings['device']}'...")
             self.embedder = create_embedder(
                 embedding_model_name=self.resolved_settings['embedding_model'],
-                device=self.resolved_settings['device']
+                device=self.resolved_settings['device'],
+                cache_manager=self.cache_manager # Pass cache_manager here
             )
         except (ValueError, ImportError) as e:
             self.progress_callback(f"[CRITICAL] Failed to create embedder: {e}. Aborting.")
@@ -290,11 +296,11 @@ class SearchSession:
         self.progress_callback("Summarizing web results...")
         # Summarization function now returns summary and reference links
         summarized_web, self._reference_links = summarization.summarize_web_results(
-            self.web_results, self.config, self.resolved_settings, self.progress_callback
+            self.web_results, self.config, self.resolved_settings, self.progress_callback, self.cache_manager # Pass cache_manager
         )
         self.progress_callback("Summarizing local results...")
         summarized_local = summarization.summarize_local_results(
-            self.local_results, self.config, self.resolved_settings, self.progress_callback
+            self.local_results, self.config, self.resolved_settings, self.progress_callback, self.cache_manager # Pass cache_manager
         )
         self.progress_callback("Building final report using RAG...")
         final_answer = reporting.build_final_answer(

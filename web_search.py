@@ -7,9 +7,11 @@ from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 import fitz  # PyMuPDF
 import json
+import logging # Added logging
+from typing import Optional # Added Optional
+from cache_manager import CacheManager # Added CacheManager import
 
-# Removed LangChain import as we'll call the API directly
-# from langchain_community.utilities import SearxSearchWrapper
+logger = logging.getLogger(__name__) # Added logger
 
 def sanitize_filename(filename):
     """Sanitize a filename by allowing only alphanumerics, dot, underscore, and dash."""
@@ -27,36 +29,91 @@ def sanitize_path(path):
     else:
         return os.sep.join(sanitized_parts)
 
-# Added progress_callback parameter
-async def download_page(session, url, headers, timeout, file_path, progress_callback):
+# Added cache_manager parameter
+async def download_page(session, url, headers, timeout, file_path, progress_callback, cache_manager: Optional[CacheManager] = None):
+    # --- Cache Check ---
+    if cache_manager:
+        cached_content = cache_manager.get_web_content(url)
+        if cached_content is not None:
+            logger.info(f"Cache hit for '{url}'. Saving to '{file_path}'")
+            try:
+                # Assume cached content is text for now, write as UTF-8
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(cached_content)
+                # Return a dict indicating it came from cache (content_type might be inaccurate)
+                return {'url': url, 'file_path': file_path, 'content_type': 'text/html; charset=utf-8 (cached)'}
+            except Exception as e:
+                logger.warning(f"Error writing cached content for {url} to {file_path}: {e}")
+                # Proceed to download if writing cache fails
+    # --- End Cache Check ---
+
     try:
+        logger.debug(f"Downloading URL: {url}")
         async with session.get(url, headers=headers, timeout=timeout) as response:
             response.raise_for_status()
             content_type = response.headers.get('Content-Type', '')
-            # If it's a PDF or image (or other binary content), read as binary.
-            if ('application/pdf' in content_type) or file_path.lower().endswith('.pdf') or \
-               ('image/' in content_type):
+            is_binary = ('application/pdf' in content_type) or file_path.lower().endswith('.pdf') or ('image/' in content_type)
+
+            if is_binary:
                 content = await response.read()
                 mode = 'wb'
                 open_kwargs = {}
+                content_to_cache = None # Don't cache binary content for now
             else:
-                content = await response.text()
+                # Try decoding with utf-8 first, fallback to response encoding or latin-1
+                try:
+                    content = await response.text(encoding='utf-8')
+                except UnicodeDecodeError:
+                    try:
+                        content = await response.text(encoding=response.get_encoding())
+                    except UnicodeDecodeError:
+                        logger.warning(f"UTF-8 and response encoding failed for {url}, falling back to latin-1")
+                        content_bytes = await response.read()
+                        content = content_bytes.decode('latin-1', errors='replace')
+
                 mode = 'w'
-                open_kwargs = {'encoding': 'utf-8'}  # write text as UTF-8 to avoid charmap errors
+                open_kwargs = {'encoding': 'utf-8'} # Always write text as UTF-8
+                content_to_cache = content # Cache the text content
+
+            # Ensure directory exists before writing
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
             with open(file_path, mode, **open_kwargs) as f:
                 f.write(content)
-            print(f"[INFO] Saved '{url}' -> '{file_path}'")
+            logger.info(f"Saved '{url}' -> '{file_path}'")
+
+            # --- Store in Cache (if text content and cache enabled) ---
+            if content_to_cache and cache_manager:
+                cache_manager.store_web_content(url, content_to_cache)
+            # --- End Store in Cache ---
+
             return {'url': url, 'file_path': file_path, 'content_type': content_type}
+    except asyncio.TimeoutError:
+        error_message = f"Timeout fetching '{url}'"
+        logger.warning(error_message)
+        if progress_callback: progress_callback(f"[WARN] {error_message}")
+        return None
+    except aiohttp.ClientResponseError as e:
+        error_message = f"HTTP Error {e.status} fetching '{url}': {e.message}"
+        logger.warning(error_message)
+        if progress_callback: progress_callback(f"[WARN] HTTP Error {e.status} for: {url}")
+        return None
+    except aiohttp.ClientError as e: # Catch other client errors like connection issues
+        error_message = f"Client error fetching '{url}': {e}"
+        logger.warning(error_message)
+        if progress_callback: progress_callback(f"[WARN] Network error for: {url}")
+        return None
     except Exception as e:
-        error_message = f"Couldn't fetch '{url}': {e}"
-        print(f"[WARN] {error_message}")
-        # Call the progress callback with the warning
-        if progress_callback:
-            progress_callback(f"[WARN] {error_message}")
+        error_message = f"Couldn't fetch or save '{url}': {repr(e)}"
+        logger.warning(error_message)
+        if progress_callback: progress_callback(f"[WARN] Error processing: {url}")
+        # Log traceback for unexpected errors
+        if not isinstance(e, (asyncio.TimeoutError, aiohttp.ClientError)):
+            logger.exception(f"Unexpected error during download_page for {url}")
         return None
 
-# Added progress_callback parameter
-async def download_webpages_ddg(keyword, limit=5, output_dir='downloaded_webpages', progress_callback=None):
+
+# Added cache_manager parameter
+async def download_webpages_ddg(keyword, limit=5, output_dir='downloaded_webpages', progress_callback=None, cache_manager: Optional[CacheManager] = None):
     """
     Perform a DuckDuckGo text search and download pages asynchronously.
     Returns a list of dicts with 'url', 'file_path', and optionally 'content_type'.
@@ -93,8 +150,8 @@ async def download_webpages_ddg(keyword, limit=5, output_dir='downloaded_webpage
             short_keyword = sanitize_filename(keyword)[:50]  # up to 50 chars
             filename = f"{short_keyword}_{idx}{ext}"
             file_path = os.path.join(output_dir, filename)
-            # Pass progress_callback to download_page
-            tasks.append(download_page(session, url, headers, timeout, file_path, progress_callback))
+            # Pass progress_callback and cache_manager to download_page
+            tasks.append(download_page(session, url, headers, timeout, file_path, progress_callback, cache_manager))
         pages = await asyncio.gather(*tasks)
         for page in pages:
             if page:
@@ -106,6 +163,7 @@ async def download_webpages_searxng(
     config, # Accept the full config dictionary
     output_dir='downloaded_webpages',
     progress_callback=None,
+    cache_manager: Optional[CacheManager] = None, # Added cache_manager
     pageno=1 # Keep pageno as it's query-specific
 ):
     """
@@ -254,8 +312,8 @@ async def download_webpages_searxng(
             filename = f"{short_keyword}{page_suffix}_{count}{ext}"
             file_path = os.path.join(output_dir, filename)
 
-            # Pass progress_callback to download_page
-            tasks.append(download_page(session, url, headers, download_timeout, file_path, progress_callback))
+            # Pass progress_callback and cache_manager to download_page
+            tasks.append(download_page(session, url, headers, download_timeout, file_path, progress_callback, cache_manager))
             count += 1 # Increment count based on successfully processed results with a URL
 
         if not tasks:

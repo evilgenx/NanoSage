@@ -1,6 +1,8 @@
 # embeddings/factory.py
+from typing import Optional # Added Optional
 from .base import BaseEmbedder
 from .local import ColPaliEmbedder, SentenceTransformerEmbedder
+from cache_manager import CacheManager # Added CacheManager import
 
 # Mapping from simple names to classes and their specific model names if needed
 # This could be expanded to include API embedders later if desired
@@ -20,7 +22,7 @@ EMBEDDER_REGISTRY = {
     # },
 }
 
-def create_embedder(embedding_model_name: str, device: str) -> BaseEmbedder:
+def create_embedder(embedding_model_name: str, device: str, cache_manager: Optional[CacheManager] = None) -> BaseEmbedder: # Added cache_manager
     """
     Factory function to create an embedder instance based on configuration.
 
@@ -55,17 +57,18 @@ def create_embedder(embedding_model_name: str, device: str) -> BaseEmbedder:
 
     print(f"[INFO] Creating embedder: {EmbedderClass.__name__} with model '{model_name_arg}' on device '{device}'")
     try:
-        # Pass the specific model name and device to the constructor
+        # Pass the specific model name, device, and cache_manager to the constructor
         if EmbedderClass == ColPaliEmbedder:
             # ColPaliEmbedder uses 'model_hf_name'
-            return EmbedderClass(model_hf_name=model_name_arg, device=device)
+            return EmbedderClass(model_hf_name=model_name_arg, device=device, cache_manager=cache_manager)
         elif EmbedderClass == SentenceTransformerEmbedder:
             # SentenceTransformerEmbedder uses 'model_st_name'
-            return EmbedderClass(model_st_name=model_name_arg, device=device)
+            return EmbedderClass(model_st_name=model_name_arg, device=device, cache_manager=cache_manager)
         else:
             # Fallback for potentially other registered classes
-            # This assumes they take 'model_name' and 'device' args, adjust if needed
-            return EmbedderClass(model_name=model_name_arg, device=device)
+            # This assumes they take 'model_name', 'device', and 'cache_manager' args, adjust if needed
+            # If a class doesn't accept cache_manager, this might fail. Consider adding checks or specific handling.
+            return EmbedderClass(model_name=model_name_arg, device=device, cache_manager=cache_manager)
     except ImportError as ie:
         print(f"[ERROR] Missing dependency for {embedding_model_name}: {ie}")
         raise # Re-raise import error

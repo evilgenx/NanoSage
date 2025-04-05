@@ -1,9 +1,24 @@
 # config_utils.py
 import os
 import yaml
+import collections.abc
 from gui.searxng_engines import DEFAULT_ENABLED_ENGINES # Import the default list
 
-# Default configuration structure
+# --- Helper for deep merging dictionaries ---
+def deep_update(source, overrides):
+    """
+    Update a nested dictionary or similar mapping.
+    Modify ``source`` in place.
+    """
+    for key, value in overrides.items():
+        if isinstance(value, collections.abc.Mapping) and value:
+            returned = deep_update(source.get(key, {}), value)
+            source[key] = returned
+        else:
+            source[key] = overrides[key]
+    return source
+
+# --- Default configuration structure ---
 DEFAULT_CONFIG = {
     'general': {
         'corpus_dir': None,
@@ -86,41 +101,55 @@ Use the provided data to generate a report of at least 3000 words on the topic.
     'api_keys': {
         'gemini_api_key': 'YOUR_GEMINI_API_KEY_HERE',
         'openrouter_api_key': 'YOUR_OPENROUTER_API_KEY_HERE'
+    },
+    'cache': {
+        'enabled': False, # Default to disabled for safety/simplicity initially
+        'db_path': "cache/nanosage_cache.db"
     }
 }
 
 def load_config(config_path):
-    """Loads configuration from a YAML file. Creates a default if not found."""
+    """
+    Loads configuration from a YAML file.
+    Creates a default file if not found.
+    Merges loaded config with defaults to ensure all keys are present.
+    """
+    # Create default config if file doesn't exist
     if not os.path.isfile(config_path):
         print(f"[INFO] Config file not found at {config_path}. Creating default config.")
         if save_config(config_path, DEFAULT_CONFIG):
             print(f"[INFO] Default configuration saved to {config_path}.")
-            return DEFAULT_CONFIG
+            # Return a deep copy of defaults if created successfully
+            import copy
+            return copy.deepcopy(DEFAULT_CONFIG)
         else:
             print(f"[ERROR] Failed to save default config to {config_path}. Returning empty config.")
             return {} # Return empty if saving failed
 
     # Load existing config file
-    config = {}
+    loaded_config = {}
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             loaded_data = yaml.safe_load(f)
-            # Ensure we return a dict even if the file is empty or contains only 'null'
-            config = loaded_data if isinstance(loaded_data, dict) else {}
+            # Ensure we have a dict even if the file is empty or contains only 'null'
+            loaded_config = loaded_data if isinstance(loaded_data, dict) else {}
     except yaml.YAMLError as e:
         print(f"[ERROR] Error parsing YAML file {config_path}: {e}")
-        # Return empty dict on parsing error
-        config = {}
+        loaded_config = {} # Start with empty on error
     except FileNotFoundError:
-        # This case is already handled by the initial check, but good practice
-        print(f"[ERROR] File not found during open: {config_path}")
-        config = {}
+        print(f"[ERROR] File not found during open (should have been created): {config_path}")
+        loaded_config = {}
     except Exception as e:
-        # Catch other potential file reading errors
         print(f"[ERROR] Failed to read config file {config_path}: {e}")
-        config = {}
+        loaded_config = {}
 
-    return config
+    # Merge loaded config onto a copy of defaults
+    # This ensures all default keys are present if missing in the loaded file
+    import copy
+    final_config = copy.deepcopy(DEFAULT_CONFIG)
+    deep_update(final_config, loaded_config) # Merge loaded values into the defaults
+
+    return final_config
 
 def save_config(config_path, config_data):
     """Saves configuration data to a YAML file."""

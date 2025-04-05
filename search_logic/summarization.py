@@ -1,6 +1,8 @@
 from llm_providers.tasks import summarize_text
+from cache_manager import CacheManager # Added import
+from typing import Optional # Added import
 
-def summarize_web_results(web_results, config, resolved_settings, progress_callback):
+def summarize_web_results(web_results, config, resolved_settings, progress_callback, cache_manager: Optional[CacheManager] = None): # Added cache_manager
     """Summarizes the collected web results."""
     lines = []
     reference_urls = []
@@ -34,12 +36,13 @@ def summarize_web_results(web_results, config, resolved_settings, progress_callb
     summary = summarize_text(
         text,
         llm_config=llm_config_for_summary,
-        max_chars=max_chars
+        max_chars=max_chars,
+        cache_manager=cache_manager # Pass cache_manager
     )
     progress_callback("Finished summarizing web results.")
     return summary, reference_links
 
-def summarize_local_results(local_results, config, resolved_settings, progress_callback):
+def summarize_local_results(local_results, config, resolved_settings, progress_callback, cache_manager: Optional[CacheManager] = None): # Added cache_manager
     """Summarizes the collected local results."""
     lines = []
     progress_callback(f"Preparing {len(local_results)} local results for summarization...")
@@ -69,7 +72,8 @@ def summarize_local_results(local_results, config, resolved_settings, progress_c
     summary = summarize_text(
         text,
         llm_config=llm_config_for_summary,
-        max_chars=max_chars
+        max_chars=max_chars,
+        cache_manager=cache_manager # Pass cache_manager
     )
     progress_callback("Finished summarizing local results.")
     return summary

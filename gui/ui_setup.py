@@ -92,6 +92,19 @@ def setup_main_window_ui(main_window):
     main_window.top_k_spinbox.setValue(3) # Default value
     general_layout.addRow("Top K Results:", main_window.top_k_spinbox)
 
+    # --- Cache Settings ---
+    main_window.cache_enabled_checkbox = QCheckBox("Enable Caching (Web/Embed/Summary)")
+    main_window.cache_enabled_checkbox.setToolTip("Check to use cached results for web downloads, embeddings, and summaries to speed up subsequent runs.")
+    general_layout.addRow(main_window.cache_enabled_checkbox)
+
+    main_window.clear_cache_button = QPushButton("Clear Cache")
+    main_window.clear_cache_button.setToolTip("Deletes the cache database file.")
+    # Add Icon for Clear Cache
+    clear_icon = QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_TrashIcon)
+    main_window.clear_cache_button.setIcon(clear_icon)
+    general_layout.addRow(main_window.clear_cache_button)
+    # --- End Cache Settings ---
+
     config_tabs.addTab(general_tab, "General")
 
     # -- Search Tab --

@@ -8,6 +8,8 @@ from knowledge_base import late_interaction_score # Removed embed_text
 # Import both download functions
 from web_search import download_webpages_ddg, download_webpages_searxng, parse_html_to_text, group_web_results_by_domain, sanitize_filename
 from embeddings.base import BaseEmbedder # Added import
+from cache_manager import CacheManager # Added import
+from typing import Optional # Added import
 
 async def perform_recursive_web_searches(
     subqueries,
@@ -19,6 +21,7 @@ async def perform_recursive_web_searches(
     config, # Pass raw config for advanced settings
     progress_callback,
     embedder: BaseEmbedder, # Changed signature to use embedder
+    cache_manager: Optional[CacheManager] = None, # Added cache_manager
     cancellation_check_callback=None # Added cancellation callback
     # Removed model, processor, model_type
 ):
@@ -82,7 +85,8 @@ async def perform_recursive_web_searches(
                     keyword=sq_clean,
                     config=config, # Pass the whole config object
                     output_dir=subquery_dir,
-                    progress_callback=progress_callback
+                    progress_callback=progress_callback,
+                    cache_manager=cache_manager # Pass cache_manager
                     # pageno defaults to 1 if not specified
                 )
             else:
@@ -95,7 +99,8 @@ async def perform_recursive_web_searches(
                  keyword=sq_clean,
                  limit=search_limit, # Pass limit here
                  output_dir=subquery_dir,
-                 progress_callback=progress_callback
+                 progress_callback=progress_callback,
+                 cache_manager=cache_manager # Pass cache_manager
              )
         else:
              progress_callback(f"[WARN] Unknown search provider '{search_provider}'. Skipping web search for this branch.")
@@ -237,6 +242,7 @@ async def perform_recursive_web_searches(
                 config=config,
                 progress_callback=progress_callback,
                 embedder=embedder, # Pass embedder down
+                cache_manager=cache_manager, # Pass cache_manager down
                 cancellation_check_callback=cancellation_check_callback # Pass callback down
                 # Removed model, processor, model_type
             )

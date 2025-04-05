@@ -6,6 +6,7 @@ import os
 import subprocess # To open files/folders
 import webbrowser # Added for mailto link
 import urllib.parse # Added for URL encoding
+import logging # Added logging
 from PyQt6.QtWidgets import (
     QMainWindow, QTextEdit, QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox,
     QCheckBox, QFileDialog, QMessageBox # Removed unused layout/widget imports
@@ -29,7 +30,8 @@ except ImportError as e:
     sys.exit(1)
 
 # Import config loading utility
-from config_utils import load_config, save_config
+from config_utils import load_config, save_config, DEFAULT_CONFIG # Added DEFAULT_CONFIG
+from cache_manager import CacheManager # Added CacheManager import
 
 # Import the selector widget (though it's created in ui_setup, we need its type potentially)
 # from .ui_components.searxng_selector import SearxngEngineSelector # Not strictly needed here if only interacting via ui_setup attributes
@@ -57,6 +59,7 @@ class MainWindow(QMainWindow):
         # self.openrouter_embedding_fetcher = None
         self.current_report_path = None
         self.current_results_dir = None
+        self.cache_manager_instance = None # Added instance variable for cache manager
 
         # Call the UI setup function from the separate module
         setup_main_window_ui(self)
@@ -104,6 +107,10 @@ class MainWindow(QMainWindow):
         self.corpus_dir_label.setText(self.config_data.get('corpus', {}).get('path', '')) # Example
         self.personality_input.setText(self.config_data.get('rag', {}).get('personality', ''))
 
+        # Cache settings initialization
+        cache_config_init = self.config_data.get('cache', {})
+        self.cache_enabled_checkbox.setChecked(cache_config_init.get('enabled', False)) # Default to False if not in config
+
         # Populate Output Format dropdown
         self.output_format_combo.clear()
         output_formats_config = self.config_data.get('llm', {}).get('output_formats', {})
@@ -146,6 +153,9 @@ class MainWindow(QMainWindow):
         self.searxng_engine_selector.selectionChanged.connect(self._handle_searxng_engine_selection_change)
         # Connect cancel button
         self.cancel_button.clicked.connect(self.cancel_search)
+        # Connect cache controls
+        self.cache_enabled_checkbox.stateChanged.connect(self._handle_cache_enabled_change)
+        self.clear_cache_button.clicked.connect(self.clear_cache)
 
 
     # --- Slot Methods ---
@@ -467,6 +477,42 @@ class MainWindow(QMainWindow):
             self.query_enhancer_worker.start()
             # Stop here, wait for enhancement preview to finish, which then triggers the search worker
 
+    def _handle_cache_enabled_change(self, state):
+        """Update config when cache enabled checkbox changes."""
+        enabled = (state == 2) # 2 means checked
+        if 'cache' not in self.config_data: self.config_data['cache'] = {}
+        self.config_data['cache']['enabled'] = enabled
+        if save_config(self.config_path, self.config_data):
+            self.log_status(f"Cache setting saved to {self.config_path} (Enabled: {enabled})")
+        else:
+            self.log_status(f"[ERROR] Failed to save cache setting to {self.config_path}")
+            QMessageBox.warning(self, "Config Error", f"Could not save cache setting to {self.config_path}")
+
+    def clear_cache(self):
+        """Clears the cache database."""
+        # Get cache path from config
+        cache_db_path = self.config_data.get('cache', {}).get('db_path', DEFAULT_CONFIG['cache']['db_path'])
+
+        reply = QMessageBox.question(self, 'Confirm Clear Cache',
+                                     f"Are you sure you want to delete the cache file?\n({cache_db_path})",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.log_status(f"Attempting to clear cache: {cache_db_path}")
+            try:
+                # Use a temporary CacheManager instance just for clearing
+                temp_cache_manager = CacheManager(cache_db_path)
+                temp_cache_manager.clear_all_cache() # This deletes and recreates
+                temp_cache_manager.close() # Close the connection
+                self.log_status("Cache cleared successfully.")
+                QMessageBox.information(self, "Cache Cleared", "The cache database has been cleared.")
+            except Exception as e:
+                error_msg = f"Failed to clear cache: {e}"
+                self.log_status(f"[ERROR] {error_msg}")
+                logging.exception("Error during cache clearing") # Log full traceback
+                QMessageBox.critical(self, "Cache Error", error_msg)
+
 
     def _start_main_search_worker(self, query_to_use):
         """
@@ -504,53 +550,72 @@ class MainWindow(QMainWindow):
                  return
             selected_generative_openrouter = self.openrouter_model_combo.currentText()
 
-        # --- Save Current Config & Prepare Search Provider Parameters ---
+        # --- Save Current Config & Prepare Search Parameters ---
+        # Reload config data to ensure we have the latest state (e.g., cache enabled)
+        self.config_data = load_config(self.config_path)
+
+        # Update config_data with current UI settings before passing to worker
+        # General
+        if 'general' not in self.config_data: self.config_data['general'] = {}
+        self.config_data['general']['web_search'] = self.web_search_checkbox.isChecked()
+        self.config_data['general']['max_depth'] = self.max_depth_spinbox.value()
+        # Retrieval
+        if 'retrieval' not in self.config_data: self.config_data['retrieval'] = {}
+        self.config_data['retrieval']['top_k'] = self.top_k_spinbox.value()
+        self.config_data['retrieval']['embedding_model'] = embedding_model_name # Already validated
+        # Corpus
+        if 'corpus' not in self.config_data: self.config_data['corpus'] = {}
+        self.config_data['corpus']['path'] = self.corpus_dir_label.text() or None
+        # RAG
+        if 'llm' not in self.config_data: self.config_data['llm'] = {}
+        self.config_data['llm']['rag_model'] = rag_model_type if rag_model_type != "None" else None
+        self.config_data['llm']['personality'] = self.personality_input.text() or None
+        self.config_data['llm']['gemini_model_id'] = selected_generative_gemini
+        self.config_data['llm']['openrouter_model_id'] = selected_generative_openrouter
+        # Cache (already saved by signal, but ensure it's in config_data)
+        if 'cache' not in self.config_data: self.config_data['cache'] = {}
+        self.config_data['cache']['enabled'] = self.cache_enabled_checkbox.isChecked()
+
+        # Search Provider specific settings
         selected_provider_text = self.search_provider_combo.currentText()
         search_provider_key = 'duckduckgo' if selected_provider_text == "DuckDuckGo" else 'searxng'
+        search_config = self.config_data.setdefault('search', {})
+        search_config['provider'] = search_provider_key
+        search_config['enable_iterative_search'] = self.iterative_search_checkbox.isChecked() # Save iterative search state
 
-        search_config = self.config_data.setdefault('search', {}) # Ensure 'search' key exists
-        search_config['provider'] = search_provider_key # Save selected provider
+        searxng_config = search_config.setdefault('searxng', {})
+        ddg_config = search_config.setdefault('duckduckgo', {})
 
-        searxng_config = search_config.setdefault('searxng', {}) # Ensure 'searxng' key exists
-        ddg_config = search_config.setdefault('duckduckgo', {}) # Ensure 'duckduckgo' key exists
-
-        search_limit = 5 # Default limit
+        search_limit = 5 # Default
         searxng_url = None
         searxng_time_range = None
         searxng_categories = None
         searxng_engines = None
 
         if search_provider_key == 'searxng':
-            # Read from GUI and update config_data (excluding engines, handled by signal)
             searxng_url = self.searxng_base_url_input.text().strip() or None
             searxng_time_range = self.searxng_time_range_input.text().strip() or None
             searxng_categories = self.searxng_categories_input.text().strip() or None
+            searxng_engines = self.config_data.get('search', {}).get('searxng', {}).get('engines', []) # Read from config (updated by signal)
+            if not isinstance(searxng_engines, list): searxng_engines = []
 
             searxng_config['base_url'] = searxng_url
             searxng_config['time_range'] = searxng_time_range
             searxng_config['categories'] = searxng_categories
+            # Engines are already saved by the signal handler
 
-            # Read current engine selection from config_data (updated by the slot)
-            searxng_engines = self.config_data.get('search', {}).get('searxng', {}).get('engines', [])
-            if not isinstance(searxng_engines, list): searxng_engines = []
-
-            # Try saving updated config
-            if save_config(self.config_path, self.config_data):
-                self.log_status(f"SearXNG settings saved to {self.config_path}")
-            else:
-                self.log_status(f"[ERROR] Failed to save configuration to {self.config_path}")
-                QMessageBox.warning(self, "Config Error", f"Could not save settings to {self.config_path}")
-                # return # Optional: stop if saving fails
-
-            search_limit = searxng_config.get('max_results', 5) # Limit read internally
-
-        elif search_provider_key == 'duckduckgo':
+            search_limit = searxng_config.get('max_results', 5)
+        else: # duckduckgo
             search_limit = ddg_config.get('max_results', 5)
-            # Try saving updated config (only provider changed)
-            if save_config(self.config_path, self.config_data):
-                 self.log_status(f"Search provider saved to {self.config_path}")
-            else:
-                 self.log_status(f"[ERROR] Failed to save configuration to {self.config_path}")
+
+        # Save the potentially modified config_data before starting the worker
+        if save_config(self.config_path, self.config_data):
+            self.log_status(f"Current settings saved to {self.config_path}")
+        else:
+            self.log_status(f"[ERROR] Failed to save configuration before starting search: {self.config_path}")
+            QMessageBox.warning(self, "Config Error", f"Could not save settings to {self.config_path}. Search may use outdated settings.")
+            # Decide whether to proceed or stop if saving fails
+            # return # Uncomment to stop if saving fails
 
         # --- Prepare All Parameters for Search Worker ---
         search_params = {

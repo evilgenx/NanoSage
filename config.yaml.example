@@ -85,3 +85,10 @@ api_keys:
   # Get your OpenRouter API key from: https://openrouter.ai/keys
   openrouter_api_key: YOUR_OPENROUTER_API_KEY_HERE
   # Add other API keys here if needed for different LLM or search providers.
+
+cache:
+  # Enable or disable caching entirely.
+  enabled: true
+  # Path to the SQLite database file (relative to project root).
+  db_path: "cache/nanosage_cache.db"
+  # Future options like expiry could go here.
