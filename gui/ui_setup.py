@@ -409,7 +409,6 @@ def setup_main_window_ui(main_window):
     status_layout.addWidget(main_window.status_log)
     status_group.setLayout(status_layout)
     right_layout.addWidget(status_group) # Status log remains on the right
-    right_layout.addStretch() # Add stretch to push status log up if needed
 
     # Results Area (TOC and Content) - MOVED TO RESULTS TAB on Left Panel
 
