@@ -92,3 +92,15 @@ cache:
   # Path to the SQLite database file (relative to project root).
   db_path: "cache/nanosage_cache.db"
   # Future options like expiry could go here.
+
+knowledge_base:
+  # Provider for the vector store ('chromadb' or 'memory'). 'memory' uses the old in-memory approach.
+  provider: chromadb
+  # Settings for chromadb provider
+  chromadb:
+    # Path to the directory where ChromaDB should persist its data.
+    path: "./chroma_db"
+    # Name of the collection within ChromaDB to use for storing embeddings.
+    collection_name: "nanosage_kb"
+    # Optional: Distance function ('l2', 'ip', 'cosine'). Defaults to 'l2'. Cosine is often good for embeddings.
+    # distance_function: "cosine"

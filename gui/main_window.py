@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QTextEdit, QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox,
     QCheckBox, QFileDialog, QMessageBox, QTreeView # Added QTreeView
 )
-from PyQt6.QtCore import Qt # Added Qt for ItemDataRole
+from PyQt6.QtCore import Qt, QModelIndex # Added Qt for ItemDataRole and QModelIndex
 from PyQt6.QtGui import QStandardItemModel, QStandardItem # Added for TreeView model
 # from PyQt6.QtGui import QIcon # Optional: for window icon
 
@@ -53,27 +53,15 @@ class MainWindow(QMainWindow):
         self.current_results_dir = None
         self.toc_item_map = {} # Dictionary to map node_id to QStandardItem
 
-        # Call the UI setup function from the separate module
-        setup_main_window_ui(self)
-
-        # --- Setup TOC Tree View ---
+        # --- Setup TOC Tree View (Moved Before UI Setup) ---
         self.toc_model = QStandardItemModel()
         self.toc_tree_view = QTreeView()
         self.toc_tree_view.setModel(self.toc_model)
         self.toc_tree_view.setHeaderHidden(True) # Hide default header
-        # Add the TreeView to the results layout (assuming results_layout exists)
-        # If results_layout doesn't exist or isn't the right place, adjust this.
-        # It might be better in a separate tab or a dock widget.
-        if hasattr(self, 'results_layout'):
-            # Add TreeView above the results text edit
-            self.results_layout.insertWidget(0, QLabel("Search Progress (TOC):"))
-            self.results_layout.insertWidget(1, self.toc_tree_view)
-            # Adjust stretch factors if needed, e.g., give tree view less space initially
-            self.results_layout.setStretch(1, 1) # TreeView stretch factor
-            self.results_layout.setStretch(3, 3) # Results TextEdit stretch factor (assuming it's index 3 now)
-        else:
-            print("[WARN] results_layout not found in MainWindow. TOC TreeView not added.")
-        # --- End Setup TOC Tree View ---
+        # Note: Adding the widget to the layout is now handled within setup_main_window_ui
+
+        # Call the UI setup function from the separate module
+        setup_main_window_ui(self)
 
         # Instantiate the controller
         self.controller = GuiController(self)
@@ -157,6 +145,7 @@ class MainWindow(QMainWindow):
 
         # --- Initial State for Result Actions ---
         self.update_result_actions_state(False) # Ensure actions are disabled initially
+        self.reset_progress_ui() # Initialize progress UI state
 
     # _init_ui method is now removed
 
@@ -182,10 +171,19 @@ class MainWindow(QMainWindow):
 
         # --- Tools Menu ---
         tools_menu = menu_bar.addMenu("&Tools")
+
+        # Config Editor Action
+        config_action = QAction("&Edit Configuration...", self)
+        config_action.triggered.connect(self.controller.show_config_editor) # Connect to controller slot
+        tools_menu.addAction(config_action)
+
+        tools_menu.addSeparator()
+
+        # Scrape URL Action
         scrape_action = QAction("&Scrape URL...", self)
-        # Connect to a controller method (to be created)
         scrape_action.triggered.connect(self.controller.show_scrape_dialog)
         tools_menu.addAction(scrape_action)
+
 
     def _connect_signals(self):
         """Connect UI signals to slots in the controller or result actions."""
@@ -225,10 +223,43 @@ class MainWindow(QMainWindow):
         #     self.controller.search_worker.tocNodeAdded.connect(self._on_toc_node_added)
         #     self.controller.search_worker.tocNodeUpdated.connect(self._on_toc_node_updated)
         # Connect search started signal (assuming controller emits this)
-        # self.controller.search_started_signal.connect(self._clear_toc_tree)
+        # Connect TOC tree click signal
+        self.toc_tree_view.clicked.connect(self._handle_toc_item_clicked)
 
 
     # --- Slot Methods (Keep UI-specific handlers) ---
+
+    def reset_progress_ui(self):
+        """Resets all progress-related UI elements to their initial state."""
+        self.status_label.setText("Idle.")
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
+        for bar in self.phase_progress_bars.values():
+            bar.setValue(0)
+            bar.setVisible(False)
+        # Clear TOC Tree
+        self._clear_toc_tree()
+        # Clear Status Log? Optional, might be useful to keep logs between runs.
+        # self.status_log.clear()
+        # Reset report path display
+        self.report_path_label.setText("Report path will appear here.")
+        self.current_report_path = None
+        self.current_results_dir = None
+        self.update_result_actions_state(False)
+
+
+    def finalize_progress_ui(self, success=True):
+        """Hides progress bars and sets final status message."""
+        self.progress_bar.setVisible(False)
+        for bar in self.phase_progress_bars.values():
+            bar.setVisible(False)
+        if success:
+            # Status label might be updated by the 'complete' message handler later
+            pass # self.status_label.setText("Search Complete.")
+        else:
+            self.status_label.setText("Search Failed or Cancelled.")
+        # Result actions are enabled by the controller upon receiving search_complete signal
+
 
     def _clear_toc_tree(self):
         """Clears the TOC tree view and the item map."""
@@ -305,6 +336,121 @@ class MainWindow(QMainWindow):
 
         # Optionally change icon or background color based on status
         # e.g., if updates.get("status") == TOCNode.STATUS_DONE: item.setIcon(...)
+
+    def _handle_toc_item_clicked(self, index: QModelIndex):
+        """Scrolls the results text edit to the anchor corresponding to the clicked TOC item."""
+        if not index.isValid():
+            return
+
+        item = self.toc_model.itemFromIndex(index)
+        if not item:
+            return
+
+        # Retrieve the anchor_id (which is the node_id) stored in the item's UserRole
+        anchor_id = item.data(Qt.ItemDataRole.UserRole)
+
+        if anchor_id:
+            self.log_status(f"Navigating to anchor: {anchor_id}")
+            self.results_text_edit.scrollToAnchor(anchor_id)
+        else:
+            self.log_status(f"No anchor ID found for clicked TOC item: {item.text()}")
+
+
+    def handle_structured_progress(self, progress_data: dict):
+        """Handles structured progress updates from the backend worker."""
+        progress_type = progress_data.get("type")
+        message = progress_data.get("message", "")
+        phase = progress_data.get("phase")
+        level = progress_data.get("level", "info") # For log messages
+
+        # 1. Update Status Label (for most types)
+        if message and progress_type not in ["toc_add", "toc_update"]: # Avoid cluttering status with TOC updates
+             # Make status label more prominent for errors/warnings
+             if progress_type == "error":
+                 self.status_label.setText(f"ERROR: {message}")
+                 # Optionally change style: self.status_label.setStyleSheet("color: red;")
+             elif level == "warning":
+                 self.status_label.setText(f"Warning: {message}")
+                 # Optionally change style: self.status_label.setStyleSheet("color: orange;")
+             elif progress_type == "status" or progress_type == "phase_start" or progress_type == "phase_end" or progress_type == "progress_update" or progress_type == "complete":
+                 self.status_label.setText(message)
+                 # Reset style if previously changed: self.status_label.setStyleSheet("")
+
+
+        # 2. Update Log Area (for log types and errors)
+        if progress_type == "log":
+            log_prefix = f"[{level.upper()}]"
+            self.log_status(f"{log_prefix} {message}")
+        elif progress_type == "error":
+            details = progress_data.get("details")
+            err_log_msg = f"[ERROR] {message}"
+            if details:
+                err_log_msg += f"\nDetails: {details}"
+            self.log_status(err_log_msg)
+            # Show popup message box for critical errors
+            QMessageBox.critical(self, "Search Error", f"{message}\n\nDetails: {details or 'N/A'}")
+
+
+        # 3. Update Progress Bars
+        if progress_type == "phase_start":
+            self.progress_bar.setVisible(True) # Show overall bar
+            self.progress_bar.setRange(0, 0) # Set overall to indeterminate initially? Or calculate later.
+            if phase in self.phase_progress_bars:
+                bar = self.phase_progress_bars[phase]
+                bar.setRange(0, 100) # Default range, might be updated by progress_update
+                bar.setValue(0)
+                bar.setVisible(True)
+        elif progress_type == "progress_update":
+            if phase in self.phase_progress_bars:
+                bar = self.phase_progress_bars[phase]
+                current = progress_data.get("current", 0)
+                total = progress_data.get("total", 100)
+                if total > 0: # Avoid division by zero and ensure valid range
+                    bar.setRange(0, total)
+                    bar.setValue(current)
+                else: # If total is 0 or unknown, set to indeterminate
+                    bar.setRange(0, 0)
+                bar.setVisible(True) # Ensure visible if it wasn't
+            # Update overall progress bar? (Complex - maybe based on phase completion)
+            # For now, keep overall indeterminate until 'complete'
+        elif progress_type == "phase_end":
+            if phase in self.phase_progress_bars:
+                bar = self.phase_progress_bars[phase]
+                bar.setRange(0, 100) # Set definite range
+                bar.setValue(100) # Mark as complete
+            # Update overall progress based on completed phases? (e.g., 25% per phase)
+            # Example: self.progress_bar.setValue(self.progress_bar.value() + 25)
+            # Requires setting overall bar range to 0-100 initially.
+            self.progress_bar.setRange(0, 100) # Ensure overall is determinate
+            # Simple increment - adjust weighting as needed
+            num_phases = len(self.phase_progress_bars)
+            increment = 100 // num_phases if num_phases > 0 else 0
+            self.progress_bar.setValue(self.progress_bar.value() + increment)
+
+        elif progress_type == "complete":
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(100)
+            # Finalize UI called by controller based on worker signal
+            # self.finalize_progress_ui(success=True)
+            report_path = progress_data.get("report_path")
+            if report_path:
+                 self.report_path_label.setText(f"Report saved: {report_path}")
+                 self.current_report_path = report_path
+                 self.current_results_dir = os.path.dirname(report_path)
+                 # Enabling buttons is handled by controller via update_result_actions_state
+
+        # 4. Update TOC Tree
+        elif progress_type == "toc_add":
+            node_data = progress_data.get("node_data")
+            if node_data:
+                self._on_toc_node_added(node_data)
+        elif progress_type == "toc_update":
+            node_id = progress_data.get("node_id")
+            # Exclude type/node_id from updates dict
+            updates = {k: v for k, v in progress_data.items() if k not in ["type", "node_id"]}
+            if node_id and updates:
+                self._on_toc_node_updated(node_id, updates)
+
 
     def update_result_actions_state(self, enabled):
         """Enables or disables result-related actions (buttons and menu items)."""

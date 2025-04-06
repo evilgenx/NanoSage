@@ -52,7 +52,8 @@ class SearchWorker(QThread):
     tocNodeAdded = pyqtSignal(dict)
     # Emits node_id (str) and dictionary of updated fields (e.g., {'status': 'Done', 'relevance': '0.85'})
     tocNodeUpdated = pyqtSignal(str, dict)
-
+    # New signal for structured progress updates (dictionaries)
+    structured_progress_updated = pyqtSignal(dict) # <<< Added this signal
 
     def __init__(self, params, parent=None):
         super().__init__(parent)
@@ -84,9 +85,13 @@ class SearchWorker(QThread):
             class ProgressCallbackProxy(QObject):
                 # Keep existing signal for string messages
                 progress_signal = pyqtSignal(str)
-                # Add signals for structured TOC updates
+                # New signal for structured progress updates (dictionaries)
+                structured_progress_signal = pyqtSignal(dict) # <<< Added this signal
+                # Add signals for structured TOC updates (These might be redundant if handled by structured_progress_signal)
+                # Let's keep them for now for backward compatibility or specific handling if needed.
                 toc_add_signal = pyqtSignal(dict)
                 toc_update_signal = pyqtSignal(str, dict)
+
 
                 def __call__(self, message):
                     # Check cancellation first
@@ -94,7 +99,10 @@ class SearchWorker(QThread):
                         return # Stop emitting if cancelled
 
                     if isinstance(message, dict):
-                        # Handle structured messages
+                        # Emit the entire dictionary through the new structured signal
+                        self.structured_progress_signal.emit(message) # <<< Emit structured signal
+
+                        # --- Optional: Keep specific handling for TOC if needed ---
                         msg_type = message.get("type")
                         if msg_type == "toc_add":
                             node_data = message.get("node_data", {})
@@ -102,23 +110,27 @@ class SearchWorker(QThread):
                                 self.toc_add_signal.emit(node_data)
                         elif msg_type == "toc_update":
                             node_id = message.get("node_id")
-                            # Create dict of updates, excluding 'type' and 'node_id'
                             updates = {k: v for k, v in message.items() if k not in ["type", "node_id"]}
                             if node_id and updates:
                                 self.toc_update_signal.emit(node_id, updates)
-                        elif msg_type == "status":
-                            status_msg = message.get("message", "")
-                            if status_msg:
-                                self.progress_signal.emit(status_msg)
-                        else:
-                            # Fallback for unknown dict types - maybe log?
-                            self.progress_signal.emit(f"[Worker] Received unknown structured message: {message}")
+                        # --- End Optional ---
+
+                        # Also emit simple status messages if present in the dict
+                        if message.get("type") == "log" or message.get("type") == "status" or message.get("type") == "phase_start" or message.get("type") == "phase_end":
+                             status_msg = message.get("message", "")
+                             if status_msg:
+                                 self.progress_signal.emit(status_msg) # Still emit simple strings for basic log/status
+
                     elif isinstance(message, str):
-                        # Handle simple string messages
+                        # Handle simple string messages (backward compatibility)
                         self.progress_signal.emit(message)
+                        # Optionally wrap simple strings into the structured format too?
+                        self.structured_progress_signal.emit({"type": "log", "level": "info", "message": message}) # <<< Wrap simple strings
                     else:
                         # Handle unexpected types
-                        self.progress_signal.emit(f"[Worker] Received unexpected progress type: {type(message)}")
+                        err_msg = f"[Worker] Received unexpected progress type: {type(message)}"
+                        self.progress_signal.emit(err_msg)
+                        self.structured_progress_signal.emit({"type": "log", "level": "warning", "message": err_msg})
 
 
                 def set_parent_worker(self, worker):
@@ -131,9 +143,10 @@ class SearchWorker(QThread):
             self._progress_callback_proxy = ProgressCallbackProxy()
             self._progress_callback_proxy.set_parent_worker(self) # Give proxy access to parent
             # Connect the proxy's signals to the worker's signals
-            self._progress_callback_proxy.progress_signal.connect(self.progress_updated.emit)
-            self._progress_callback_proxy.toc_add_signal.connect(self.tocNodeAdded.emit)
-            self._progress_callback_proxy.toc_update_signal.connect(self.tocNodeUpdated.emit)
+            self._progress_callback_proxy.progress_signal.connect(self.progress_updated.emit) # For simple string messages
+            self._progress_callback_proxy.structured_progress_signal.connect(self.structured_progress_updated.emit) # <<< Connect structured signal
+            self._progress_callback_proxy.toc_add_signal.connect(self.tocNodeAdded.emit) # Keep specific TOC signals for now
+            self._progress_callback_proxy.toc_update_signal.connect(self.tocNodeUpdated.emit) # Keep specific TOC signals for now
 
 
             # Check cancellation before starting
@@ -291,6 +304,9 @@ class SearchWorker(QThread):
                 # Check if disconnect is needed/safe
                 try:
                     self._progress_callback_proxy.progress_signal.disconnect()
+                    self._progress_callback_proxy.structured_progress_signal.disconnect() # <<< Disconnect new signal
+                    self._progress_callback_proxy.toc_add_signal.disconnect()
+                    self._progress_callback_proxy.toc_update_signal.disconnect()
                 except TypeError:
                     pass # Signal already disconnected
                 self._progress_callback_proxy = None

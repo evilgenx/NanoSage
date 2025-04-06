@@ -33,7 +33,7 @@ class ResultDisplayManager(QObject):
         self.toc_proxy_model.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.toc_proxy_model.setFilterKeyColumn(0) # Filter based on the text in the first column
         self.toc_proxy_model.setRecursiveFilteringEnabled(True) # Filter recursively
-        self.main_window.toc_tree_widget.setModel(self.toc_proxy_model) # Set proxy model on the view
+        self.main_window.toc_tree_view.setModel(self.toc_proxy_model) # Set proxy model on the view
 
         # Instantiate the syntax highlighter
         self.highlighter = MarkdownSyntaxHighlighter(self.main_window.results_text_edit.document())
@@ -69,18 +69,18 @@ class ResultDisplayManager(QObject):
 
         # 3. Connect TOC click signal (disconnect first)
         try:
-            self.main_window.toc_tree_widget.clicked.disconnect(self._handle_toc_click)
+            self.main_window.toc_tree_view.clicked.disconnect(self._handle_toc_click)
         except TypeError:
             pass # Signal not connected
-        self.main_window.toc_tree_widget.clicked.connect(self._handle_toc_click)
+        self.main_window.toc_tree_view.clicked.connect(self._handle_toc_click)
 
         # 4. Setup Context Menu for TOC (disconnect first)
-        self.main_window.toc_tree_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.main_window.toc_tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         try:
-             self.main_window.toc_tree_widget.customContextMenuRequested.disconnect(self._handle_toc_context_menu)
+             self.main_window.toc_tree_view.customContextMenuRequested.disconnect(self._handle_toc_context_menu)
         except TypeError:
              pass # Signal not connected
-        self.main_window.toc_tree_widget.customContextMenuRequested.connect(self._handle_toc_context_menu)
+        self.main_window.toc_tree_view.customContextMenuRequested.connect(self._handle_toc_context_menu)
 
         self.log_status("Results displayed.")
 
@@ -143,7 +143,7 @@ class ResultDisplayManager(QObject):
                     add_items(item, node.children)
 
         add_items(self.toc_source_model.invisibleRootItem(), toc_nodes)
-        # self.main_window.toc_tree_widget.expandToDepth(0) # Optional: Expand top level after populating
+        # self.main_window.toc_tree_view.expandToDepth(0) # Optional: Expand top level after populating
 
     def _handle_toc_click(self, index: QModelIndex):
         """Scrolls the results view to the anchor associated with the clicked TOC item."""
@@ -168,7 +168,7 @@ class ResultDisplayManager(QObject):
 
     def _handle_toc_context_menu(self, position):
         """Shows a context menu for the TOC tree."""
-        index = self.main_window.toc_tree_widget.indexAt(position)
+        index = self.main_window.toc_tree_view.indexAt(position)
         if not index.isValid():
             return
 
@@ -207,7 +207,7 @@ class ResultDisplayManager(QObject):
         copy_summary_action.setEnabled(bool(toc_node.summary)) # Enable only if summary exists
 
         # Execute Menu
-        action = menu.exec(self.main_window.toc_tree_widget.viewport().mapToGlobal(position))
+        action = menu.exec(self.main_window.toc_tree_view.viewport().mapToGlobal(position))
 
         # Handle Actions
         if action == refine_action and anchor_id:
@@ -228,21 +228,21 @@ class ResultDisplayManager(QObject):
         self.toc_proxy_model.setFilterRegularExpression(text)
         # Optional: Automatically expand items when filtering?
         # if text:
-        #     self.main_window.toc_tree_widget.expandAll()
+        #     self.main_window.toc_tree_view.expandAll()
         # else:
-        #     self.main_window.toc_tree_widget.collapseAll() # Or restore previous state
+        #     self.main_window.toc_tree_view.collapseAll() # Or restore previous state
 
     # --- TOC Expand/Collapse Handlers ---
 
     def _handle_toc_expand_all(self):
         """Expands all items in the TOC tree."""
         self.log_status("Expanding all TOC items.")
-        self.main_window.toc_tree_widget.expandAll()
+        self.main_window.toc_tree_view.expandAll()
 
     def _handle_toc_collapse_all(self):
         """Collapses all items in the TOC tree."""
         self.log_status("Collapsing all TOC items.")
-        self.main_window.toc_tree_widget.collapseAll()
+        self.main_window.toc_tree_view.collapseAll()
 
     # --- Search Within Results Handlers ---
 

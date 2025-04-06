@@ -2,6 +2,9 @@ import re # Added for anchor insertion
 from llm_providers.tasks import rag_final_answer
 import toc_tree
 from aggregator import aggregate_results
+from typing import Optional, Dict, Any # Added import
+# Import send_progress helper
+from .web_recursive import send_progress # Use relative import
 
 def build_final_answer(
     enhanced_query,
@@ -16,6 +19,8 @@ def build_final_answer(
     follow_up_convo=""
 ):
     """Builds the final RAG answer, optionally including visuals."""
+    send_progress(progress_callback, "phase_start", {"phase": "build_report", "message": "Building final report content..."})
+
     toc_str = toc_tree.build_toc_string(toc_tree_nodes) if toc_tree_nodes else "No Table of Contents generated (Web search might be disabled or yielded no relevant branches)." # Use toc_tree
     # Build a reference links string
     reference_links_str = ""
@@ -29,12 +34,15 @@ def build_final_answer(
 
     if not prompt_template_content:
         # This should ideally not happen due to the checks in the worker, but handle defensively
-        progress_callback("[ERROR] Prompt template content missing in resolved_settings. Cannot generate final answer.")
-        return "Error: Could not load prompt template for final report generation."
+        err_msg = "Prompt template content missing in resolved_settings. Cannot generate final answer."
+        send_progress(progress_callback, "error", {"message": err_msg})
+        send_progress(progress_callback, "phase_end", {"phase": "build_report", "message": "Report building failed (missing template)."})
+        return f"Error: {err_msg}"
 
     # --- Conditionally add visual instructions ---
     if include_visuals:
-        progress_callback("Adding visual instructions to prompt...")
+        vis_msg = "Adding visual instructions to prompt..."
+        send_progress(progress_callback, "log", {"level": "info", "message": vis_msg})
         visual_instructions = """
 # Visual Content Guidelines (Apply ONLY if relevant and adds significant value)
 *   **Images:** Where appropriate (e.g., illustrating a concept, showing a specific item mentioned), embed relevant images using Markdown: `![Descriptive Alt Text](URL)`. Prioritize using image URLs found in the {reference_links_str} if suitable.
@@ -47,7 +55,9 @@ def build_final_answer(
     # --- End conditional visual instructions ---
 
     # Format the loaded template with the gathered data
-    progress_callback("Formatting final RAG prompt...")
+    format_msg = "Formatting final RAG prompt..."
+    send_progress(progress_callback, "status", {"message": format_msg})
+    send_progress(progress_callback, "log", {"level": "info", "message": format_msg})
     try:
         # Ensure all expected keys are present, even if empty, to avoid KeyError on format
         format_data = {
@@ -60,14 +70,20 @@ def build_final_answer(
         }
         final_prompt = prompt_template_content.format(**format_data)
     except KeyError as e:
-        progress_callback(f"[ERROR] Missing key in prompt template formatting: {e}. Check template file placeholders.")
+        err_msg = f"Missing key in prompt template formatting: {e}. Check template file placeholders."
+        send_progress(progress_callback, "error", {"message": err_msg})
+        send_progress(progress_callback, "phase_end", {"phase": "build_report", "message": "Report building failed (template format error)."})
         return f"Error: Prompt template formatting failed due to missing key: {e}"
     except Exception as e:
-        progress_callback(f"[ERROR] An unexpected error occurred during prompt formatting: {e}")
+        err_msg = f"An unexpected error occurred during prompt formatting: {e}"
+        send_progress(progress_callback, "error", {"message": err_msg, "details": traceback.format_exc()})
+        send_progress(progress_callback, "phase_end", {"phase": "build_report", "message": "Report building failed (prompt format error)."})
         return f"Error: Failed to format prompt template: {e}"
 
     # Use resolved RAG model
-    progress_callback(f"Calling final RAG model ({resolved_settings['rag_model']})...")
+    rag_call_msg = f"Calling final RAG model ({resolved_settings['rag_model']})..."
+    send_progress(progress_callback, "status", {"message": rag_call_msg})
+    send_progress(progress_callback, "log", {"level": "info", "message": rag_call_msg})
     print("[DEBUG] Final RAG prompt formatted. Passing to rag_final_answer()...")
     # Assemble llm_config for the final RAG task
     provider = resolved_settings.get('rag_model', 'gemma')
@@ -84,15 +100,19 @@ def build_final_answer(
         llm_config=llm_config_for_rag
         # Consider adding progress_callback to rag_final_answer if it's long
     )
-    progress_callback("Final RAG generation complete.")
+    send_progress(progress_callback, "log", {"level": "info", "message": "Final RAG generation complete."})
+
 
     # --- Insert Anchors ---
     if toc_tree_nodes:
-        progress_callback("Inserting anchors into final report...")
+        anchor_msg = "Inserting anchors into final report..."
+        send_progress(progress_callback, "status", {"message": anchor_msg})
+        send_progress(progress_callback, "log", {"level": "info", "message": anchor_msg})
         final_answer = _insert_anchors_into_report(final_answer, toc_tree_nodes)
-        progress_callback("Anchors inserted.")
+        send_progress(progress_callback, "log", {"level": "info", "message": "Anchors inserted."})
     # --- End Insert Anchors ---
 
+    send_progress(progress_callback, "phase_end", {"phase": "build_report", "message": "Finished building report content."})
     return final_answer
 
 def _insert_anchors_into_report(report_content, toc_nodes):
@@ -175,7 +195,8 @@ def save_report(
     follow_up_convo=None
 ):
     """Saves the final aggregated report."""
-    progress_callback("Aggregating results and saving report...")
+    save_msg = "Aggregating results and saving report..."
+    send_progress(progress_callback, "phase_start", {"phase": "save_report", "message": save_msg})
     print("[INFO] Saving final report to disk...")
     output_path = aggregate_results(
         query_id,
@@ -189,5 +210,7 @@ def save_report(
         follow_up_conversation=follow_up_convo
         # Removed toc_nodes=self.toc_tree as it's not an expected argument
     )
-    progress_callback(f"Report saved to: {output_path}")
+    end_msg = f"Report saved to: {output_path}"
+    send_progress(progress_callback, "phase_end", {"phase": "save_report", "message": end_msg})
+    send_progress(progress_callback, "complete", {"report_path": output_path, "message": end_msg}) # Send overall completion
     return output_path

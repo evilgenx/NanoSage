@@ -368,12 +368,51 @@ def setup_main_window_ui(main_window):
     # main_window.run_button.setStyleSheet("...")
     left_layout.addWidget(main_window.run_button)
 
-    # Add Progress Bar
+    # --- Progress Visualization Area ---
+    progress_group = QGroupBox("Progress")
+    progress_layout = QVBoxLayout()
+    progress_layout.setContentsMargins(5, 8, 5, 8) # Tighter margins for progress group
+    progress_layout.setSpacing(5) # Space between progress elements
+
+    # Add Status Label
+    main_window.status_label = QLabel("Idle.")
+    main_window.status_label.setObjectName("status_label") # Set object name for styling
+    main_window.status_label.setWordWrap(True) # Allow wrapping for longer messages
+    progress_layout.addWidget(main_window.status_label)
+
+    # Add Overall Progress Bar (existing one)
     main_window.progress_bar = QProgressBar()
+    main_window.progress_bar.setObjectName("overall_progress_bar")
     main_window.progress_bar.setVisible(False) # Initially hidden
     main_window.progress_bar.setRange(0, 100) # Default range, will be set to 0,0 for indeterminate
-    main_window.progress_bar.setTextVisible(False) # Hide percentage text
-    left_layout.addWidget(main_window.progress_bar)
+    main_window.progress_bar.setTextVisible(True) # Show percentage for overall
+    main_window.progress_bar.setFormat("Overall: %p%") # Set format
+    progress_layout.addWidget(main_window.progress_bar)
+
+    # Add Phase-Specific Progress Bars
+    main_window.phase_progress_bars = {}
+    phases = {
+        "web_search": "Web Search",
+        "embedding": "Embedding",
+        "summarization": "Summarization",
+        "reporting": "Reporting"
+        # Add more phases if needed (e.g., local_corpus, iterative_search)
+    }
+    for phase_key, phase_name in phases.items():
+        bar = QProgressBar()
+        bar.setObjectName(f"progress_bar_{phase_key}")
+        bar.setFormat(f"{phase_name}: %p%")
+        bar.setTextVisible(True)
+        bar.setVisible(False) # Initially hidden
+        bar.setRange(0, 100)
+        bar.setValue(0)
+        progress_layout.addWidget(bar)
+        main_window.phase_progress_bars[phase_key] = bar
+
+    progress_group.setLayout(progress_layout)
+    left_layout.addWidget(progress_group) # Add the group box to the left layout
+    # --- End Progress Visualization Area ---
+
 
     # Add Cancel Button
     main_window.cancel_button = QPushButton("Cancel Search")

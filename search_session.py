@@ -17,6 +17,8 @@ from llm_providers.utils import clean_search_query
 import toc_tree
 # Import new modules/factories
 from embeddings.factory import create_embedder # Import the embedder factory
+# Import send_progress helper
+from search_logic.web_recursive import send_progress
 from search_logic import web_recursive, subquery as subquery_logic, summarization, reporting
 
 #########################################################
@@ -54,7 +56,8 @@ class SearchSession:
         self.base_result_dir = os.path.join(results_base_dir, self.query_id)
         os.makedirs(self.base_result_dir, exist_ok=True)
 
-        self.progress_callback(f"Initializing SearchSession (ID: {self.query_id})...")
+        # Start Initialization Phase
+        send_progress(self.progress_callback, "phase_start", {"phase": "initialization", "message": f"Initializing SearchSession (ID: {self.query_id})..."})
         print(f"[INFO] Initializing SearchSession for query_id={self.query_id}")
 
         # --- Query Enhancement Removed from __init__ ---
@@ -63,52 +66,89 @@ class SearchSession:
         # via the "Extract Text (Keywords)" checkbox.
         # The SearchSession now receives the query it should use directly.
         self.enhanced_query = self.query # Use the provided query directly
-        self.progress_callback(f"Using Query: {self.enhanced_query}")
+        send_progress(self.progress_callback, "log", {"level": "info", "message": f"Using Query: {self.enhanced_query}"})
         # --- End Query Enhancement Removal ---
 
 
         # --- Initialize Embedder ---
         try:
-            self.progress_callback(f"Creating embedder for model='{self.resolved_settings['embedding_model']}' on device='{self.resolved_settings['device']}'...")
+            embed_msg = f"Creating embedder for model='{self.resolved_settings['embedding_model']}' on device='{self.resolved_settings['device']}'..."
+            send_progress(self.progress_callback, "status", {"message": embed_msg})
+            send_progress(self.progress_callback, "log", {"level": "info", "message": embed_msg})
             self.embedder = create_embedder(
                 embedding_model_name=self.resolved_settings['embedding_model'],
                 device=self.resolved_settings['device'],
                 cache_manager=self.cache_manager # Pass cache_manager here
             )
         except (ValueError, ImportError) as e:
-            self.progress_callback(f"[CRITICAL] Failed to create embedder: {e}. Aborting.")
-            print(f"[ERROR] Failed to create embedder: {e}\n{traceback.format_exc()}")
+            err_msg = f"Failed to create embedder: {e}. Aborting."
+            send_progress(self.progress_callback, "error", {"message": err_msg, "details": traceback.format_exc()})
+            print(f"[ERROR] {err_msg}\n{traceback.format_exc()}")
             raise # Re-raise the critical error
 
-        # --- Initialize KnowledgeBase with the embedder ---
-        self.progress_callback(f"Initializing KnowledgeBase...")
-        self.kb = KnowledgeBase(
-            embedder=self.embedder,
-            progress_callback=self.progress_callback
-        )
+        # --- Initialize KnowledgeBase with the embedder and DB settings ---
+        kb_config = self.config.get('knowledge_base', {})
+        kb_provider = kb_config.get('provider', 'chromadb') # Default to chromadb if not specified
+
+        if kb_provider == 'chromadb':
+            chroma_settings = kb_config.get('chromadb', {})
+            db_path = chroma_settings.get('path', DEFAULT_CONFIG['knowledge_base']['chromadb']['path'])
+            collection_name = chroma_settings.get('collection_name', DEFAULT_CONFIG['knowledge_base']['chromadb']['collection_name'])
+            kb_msg = f"Initializing ChromaDB KnowledgeBase (Path: {db_path}, Collection: {collection_name})..."
+            send_progress(self.progress_callback, "status", {"message": kb_msg})
+            send_progress(self.progress_callback, "log", {"level": "info", "message": kb_msg})
+            try:
+                self.kb = KnowledgeBase(
+                    embedder=self.embedder,
+                    db_path=db_path,
+                    collection_name=collection_name,
+                    progress_callback=self.progress_callback
+                )
+            except Exception as e:
+                 err_msg = f"Failed to initialize ChromaDB KnowledgeBase: {e}. Aborting."
+                 send_progress(self.progress_callback, "error", {"message": err_msg, "details": traceback.format_exc()})
+                 print(f"[ERROR] {err_msg}\n{traceback.format_exc()}")
+                 raise # Re-raise critical error
+        else:
+            # Handle other providers or fallback to in-memory if needed
+            # For now, raise an error if provider is not chromadb
+            err_msg = f"Unsupported knowledge base provider specified in config: '{kb_provider}'. Aborting."
+            send_progress(self.progress_callback, "error", {"message": err_msg})
+            print(f"[ERROR] {err_msg}")
+            raise ValueError(err_msg)
         # Removed self.model_type, self.model, self.processor storage
 
         # Compute the overall enhanced query embedding using the embedder
-        self.progress_callback("Computing embedding for enhanced query...")
+        query_embed_msg = "Computing embedding for enhanced query..."
+        send_progress(self.progress_callback, "status", {"message": query_embed_msg})
+        send_progress(self.progress_callback, "log", {"level": "info", "message": query_embed_msg})
         print("[INFO] Computing embedding for enhanced query...")
         try:
             self.enhanced_query_embedding = self.embedder.embed(self.enhanced_query)
             if self.enhanced_query_embedding is None:
                 # Handle embedding failure
-                self.progress_callback("[CRITICAL] Failed to compute initial query embedding (returned None). Aborting.")
-                raise ValueError("Failed to compute initial query embedding.")
+                err_msg = "Failed to compute initial query embedding (returned None). Aborting."
+                send_progress(self.progress_callback, "error", {"message": err_msg})
+                raise ValueError(err_msg)
         except Exception as e:
-             self.progress_callback(f"[CRITICAL] Exception during initial query embedding: {e}. Aborting.")
-             print(f"[ERROR] Exception during initial query embedding: {e}\n{traceback.format_exc()}")
-             raise ValueError(f"Failed to compute initial query embedding: {e}") from e
+             err_msg = f"Exception during initial query embedding: {e}. Aborting."
+             send_progress(self.progress_callback, "error", {"message": err_msg, "details": traceback.format_exc()})
+             print(f"[ERROR] {err_msg}\n{traceback.format_exc()}")
+             raise ValueError(err_msg) from e
 
 
         # Build local corpus if directory is provided using resolved setting
         if self.resolved_settings['corpus_dir']:
             # KnowledgeBase now uses its embedder internally, no need to pass keys/models
+            # KB.build_from_directory should ideally use send_progress internally
+            send_progress(self.progress_callback, "phase_start", {"phase": "local_corpus", "message": f"Building knowledge base from local directory: {self.resolved_settings['corpus_dir']}"})
             self.kb.build_from_directory(self.resolved_settings['corpus_dir'])
+            send_progress(self.progress_callback, "phase_end", {"phase": "local_corpus", "message": "Finished building from local directory."})
         else:
-            self.progress_callback("No local corpus directory specified.")
+            send_progress(self.progress_callback, "log", {"level": "info", "message": "No local corpus directory specified."})
+
+        # End Initialization Phase
+        send_progress(self.progress_callback, "phase_end", {"phase": "initialization", "message": "Initialization complete."})
 
         # Placeholders for web search results and TOC tree.
         self.web_results = []
@@ -125,18 +165,22 @@ class SearchSession:
         Main entry point: perform recursive web search (if enabled) and then local retrieval.
         """
         # Use resolved max_depth
-        self.progress_callback(f"Starting search session (Max Depth: {self.resolved_settings['max_depth']})...")
+        start_msg = f"Starting search session (Max Depth: {self.resolved_settings['max_depth']})..."
+        send_progress(self.progress_callback, "status", {"message": start_msg})
+        send_progress(self.progress_callback, "log", {"level": "info", "message": start_msg})
         print(f"[INFO] Starting session with query_id={self.query_id}, max_depth={self.resolved_settings['max_depth']}")
         plain_enhanced_query = clean_search_query(self.enhanced_query) # Use clean_search_query from utils
 
         # 1) Generate subqueries from the enhanced query
-        self.progress_callback("Generating initial subqueries...")
+        send_progress(self.progress_callback, "phase_start", {"phase": "subquery_generation", "message": "Generating initial subqueries..."})
         initial_subqueries = subquery_logic.generate_initial_subqueries(self.enhanced_query, self.config)
-        self.progress_callback(f"Generated {len(initial_subqueries)} initial subqueries.")
+        send_progress(self.progress_callback, "log", {"level": "info", "message": f"Generated {len(initial_subqueries)} initial subqueries."})
+        send_progress(self.progress_callback, "phase_end", {"phase": "subquery_generation", "message": "Finished generating initial subqueries."})
+
 
         # 2) Optionally do a Monte Carlo approach to sample subqueries
         if self.config.get('advanced', {}).get("monte_carlo_search", True):
-            self.progress_callback("Performing Monte Carlo subquery sampling...")
+            send_progress(self.progress_callback, "phase_start", {"phase": "monte_carlo", "message": "Performing Monte Carlo subquery sampling..."})
             initial_subqueries = subquery_logic.perform_monte_carlo_subqueries(
                 parent_query=plain_enhanced_query,
                 subqueries=initial_subqueries,
@@ -147,11 +191,13 @@ class SearchSession:
                 embedder=self.embedder # Pass embedder instance
                 # Removed model, processor, model_type
             )
-            self.progress_callback(f"Selected {len(initial_subqueries)} subqueries via Monte Carlo.")
+            send_progress(self.progress_callback, "log", {"level": "info", "message": f"Selected {len(initial_subqueries)} subqueries via Monte Carlo."})
+            send_progress(self.progress_callback, "phase_end", {"phase": "monte_carlo", "message": "Finished Monte Carlo sampling."})
+
 
         # 3) If web search is enabled and max_depth >= 1, do the recursive expansion
         if self.resolved_settings['web_search'] and self.resolved_settings['max_depth'] >= 1:
-            self.progress_callback("Starting recursive web search...")
+            send_progress(self.progress_callback, "phase_start", {"phase": "web_search", "message": "Starting recursive web search..."})
             web_results, web_entries, grouped, toc_nodes = await web_recursive.perform_recursive_web_searches(
                 subqueries=initial_subqueries,
                 current_depth=1,
@@ -170,30 +216,38 @@ class SearchSession:
             self.toc_tree = toc_nodes
             # Assign anchor IDs after the tree is built
             if self.toc_tree:
-                self.progress_callback("Assigning anchor IDs to TOC nodes...")
+                send_progress(self.progress_callback, "log", {"level": "info", "message": "Assigning anchor IDs to TOC nodes..."})
                 toc_tree.assign_anchor_ids(self.toc_tree)
             # Add new entries to the knowledge base
-            self.progress_callback(f"Adding {len(web_entries)} web entries to knowledge base...")
+            # KB.add_documents should ideally use send_progress internally
+            send_progress(self.progress_callback, "phase_start", {"phase": "kb_add_web", "message": f"Adding {len(web_entries)} web entries to knowledge base..."})
             self.kb.add_documents(web_entries) # KB handles API keys internally now
-            self.progress_callback("Finished recursive web search.")
+            send_progress(self.progress_callback, "phase_end", {"phase": "kb_add_web", "message": "Finished adding web entries."})
+            send_progress(self.progress_callback, "phase_end", {"phase": "web_search", "message": "Finished recursive web search."})
         else:
-            self.progress_callback("Web search disabled or max_depth < 1, skipping.")
-            print("[INFO] Web search is disabled or max_depth < 1, skipping web expansion.")
+            skip_msg = "Web search disabled or max_depth < 1, skipping."
+            send_progress(self.progress_callback, "log", {"level": "info", "message": skip_msg})
+            print(f"[INFO] {skip_msg}")
 
         # 4) Local retrieval (uses the KB's search method)
         # Use resolved top_k
-        self.progress_callback(f"Retrieving top {self.resolved_settings['top_k']} documents from knowledge base...")
+        local_retrieval_msg = f"Retrieving top {self.resolved_settings['top_k']} documents from knowledge base..."
+        send_progress(self.progress_callback, "phase_start", {"phase": "local_retrieval", "message": local_retrieval_msg})
         print(f"[INFO] Retrieving top {self.resolved_settings['top_k']} documents for final answer.")
         # KB.search now uses its internal embedder, no need for keys/models
+        # KB.search should ideally use send_progress internally
         self.local_results = self.kb.search(
             self.enhanced_query,
             top_k=self.resolved_settings['top_k']
         )
-        self.progress_callback(f"Retrieved {len(self.local_results)} initial documents from knowledge base.")
+        send_progress(self.progress_callback, "log", {"level": "info", "message": f"Retrieved {len(self.local_results)} initial documents from knowledge base."})
+        send_progress(self.progress_callback, "phase_end", {"phase": "local_retrieval", "message": "Finished initial local retrieval."})
+
 
         # --- NEW: Iterative Sub-Query Generation (Agentic Step) ---
         if self.resolved_settings.get('enable_iterative_search', False) and self.resolved_settings.get('rag_model') != 'None':
-            self.progress_callback("Iterative search enabled. Analyzing initial results...")
+            iterative_start_msg = "Iterative search enabled. Analyzing initial results..."
+            send_progress(self.progress_callback, "phase_start", {"phase": "iterative_search", "message": iterative_start_msg})
             print("[INFO] Starting iterative sub-query generation step.")
 
             # a) Prepare Context Summary (Simple concatenation for now)
@@ -207,7 +261,8 @@ class SearchSession:
             context_summary_for_llm = "\n\n".join(context_texts).strip()
 
             if not context_summary_for_llm:
-                self.progress_callback("[WARN] No context found from initial results to generate follow-up queries.")
+                warn_msg = "No context found from initial results to generate follow-up queries."
+                send_progress(self.progress_callback, "log", {"level": "warning", "message": warn_msg})
             else:
                 # b) Generate Follow-up Queries
                 # Prepare llm_config for the generation task (using RAG model settings)
@@ -217,7 +272,9 @@ class SearchSession:
                     "api_key": self.resolved_settings.get(f"{self.resolved_settings.get('rag_model')}_api_key"),
                     "personality": self.resolved_settings.get('personality')
                 }
-                self.progress_callback("Generating follow-up queries using LLM...")
+                gen_followup_msg = "Generating follow-up queries using LLM..."
+                send_progress(self.progress_callback, "status", {"message": gen_followup_msg})
+                send_progress(self.progress_callback, "log", {"level": "info", "message": gen_followup_msg})
                 followup_queries = generate_followup_queries(
                     initial_query=self.enhanced_query,
                     context_summary=context_summary_for_llm[:8000], # Limit context length for LLM
@@ -226,15 +283,21 @@ class SearchSession:
                 )
 
                 if followup_queries:
-                    self.progress_callback(f"Generated {len(followup_queries)} follow-up queries: {', '.join(followup_queries)}")
+                    gen_msg = f"Generated {len(followup_queries)} follow-up queries: {', '.join(followup_queries)}"
+                    send_progress(self.progress_callback, "log", {"level": "info", "message": gen_msg})
                     followup_docs_added = 0
-                    for f_query in followup_queries:
+                    # Start phase for follow-up searches
+                    send_progress(self.progress_callback, "phase_start", {"phase": "iterative_followup", "message": f"Executing {len(followup_queries)} follow-up searches..."})
+                    for fq_idx, f_query in enumerate(followup_queries):
                         # Check cancellation before each sub-query search
                         if cancellation_check_callback and cancellation_check_callback():
-                            self.progress_callback("Cancellation requested during follow-up search.")
+                            send_progress(self.progress_callback, "log", {"level": "info", "message": "Cancellation requested during follow-up search."})
                             raise asyncio.CancelledError("Search cancelled by user.")
 
-                        self.progress_callback(f"Executing follow-up search for: '{f_query}'")
+                        # Report progress within follow-up searches
+                        followup_search_msg = f"Executing follow-up search {fq_idx+1}/{len(followup_queries)}: '{f_query}'"
+                        send_progress(self.progress_callback, "progress_update", {"phase": "iterative_followup", "current": fq_idx + 1, "total": len(followup_queries), "unit": "Queries", "message": followup_search_msg})
+                        send_progress(self.progress_callback, "log", {"level": "info", "message": followup_search_msg})
                         try:
                             # c) Execute Follow-up Queries (Simple DDG search)
                             # Use a smaller limit for follow-up searches
@@ -263,52 +326,69 @@ class SearchSession:
                                                  }
                                              }
                                              # Add the single entry (as a list) to the KB
+                                             # KB.add_documents should ideally use send_progress
                                              self.kb.add_documents([entry])
                                              followup_docs_added += 1
                                          else:
-                                             self.progress_callback(f"[WARN] Failed to embed follow-up content from: {res.get('href', 'unknown URL')}")
+                                             warn_msg = f"Failed to embed follow-up content from: {res.get('href', 'unknown URL')}"
+                                             send_progress(self.progress_callback, "log", {"level": "warning", "message": warn_msg})
                                          # Optional: Log added doc source
-                                        # self.progress_callback(f"  Added follow-up content from: {res['href']}")
+                                        # send_progress(self.progress_callback, "log", {"level": "debug", "message": f"  Added follow-up content from: {res['href']}"})
                                 except Exception as parse_err:
-                                    print(f"[WARN] Failed to parse follow-up result from {res.get('href', 'unknown URL')}: {parse_err}")
-                                    self.progress_callback(f"[WARN] Failed to parse follow-up result: {res.get('href', 'unknown URL')}")
+                                    warn_msg = f"Failed to parse follow-up result from {res.get('href', 'unknown URL')}: {parse_err}"
+                                    print(f"[WARN] {warn_msg}")
+                                    send_progress(self.progress_callback, "log", {"level": "warning", "message": warn_msg})
 
                         except Exception as search_err:
-                            print(f"[ERROR] Failed to execute follow-up search for '{f_query}': {search_err}")
-                            self.progress_callback(f"[ERROR] Failed follow-up search for: '{f_query}'")
+                            err_msg = f"Failed to execute follow-up search for '{f_query}': {search_err}"
+                            print(f"[ERROR] {err_msg}")
+                            send_progress(self.progress_callback, "log", {"level": "error", "message": err_msg})
+
+                    # End phase for follow-up searches
+                    send_progress(self.progress_callback, "phase_end", {"phase": "iterative_followup", "message": "Finished follow-up searches."})
 
                     if followup_docs_added > 0:
-                        self.progress_callback(f"Added {followup_docs_added} documents from follow-up searches to knowledge base.")
+                        add_msg = f"Added {followup_docs_added} documents from follow-up searches to knowledge base."
+                        send_progress(self.progress_callback, "log", {"level": "info", "message": add_msg})
                         # e) Re-run Local Retrieval
-                        self.progress_callback("Re-running local retrieval with updated knowledge base...")
+                        rerun_msg = "Re-running local retrieval with updated knowledge base..."
+                        send_progress(self.progress_callback, "phase_start", {"phase": "local_retrieval_rerun", "message": rerun_msg})
                         # KB.search uses its internal embedder
                         self.local_results = self.kb.search(
                             self.enhanced_query,
                             top_k=self.resolved_settings['top_k'] # Use the original top_k
                         )
-                        self.progress_callback(f"Retrieved {len(self.local_results)} documents after follow-up searches.")
+                        send_progress(self.progress_callback, "log", {"level": "info", "message": f"Retrieved {len(self.local_results)} documents after follow-up searches."})
+                        send_progress(self.progress_callback, "phase_end", {"phase": "local_retrieval_rerun", "message": "Finished re-running local retrieval."})
                     else:
-                         self.progress_callback("No new documents added from follow-up searches.")
+                         send_progress(self.progress_callback, "log", {"level": "info", "message": "No new documents added from follow-up searches."})
 
                 else:
-                    self.progress_callback("LLM did not generate any follow-up queries.")
+                    send_progress(self.progress_callback, "log", {"level": "info", "message": "LLM did not generate any follow-up queries."})
+            # End iterative search phase
+            send_progress(self.progress_callback, "phase_end", {"phase": "iterative_search", "message": "Finished iterative search step."})
         else:
              if self.resolved_settings.get('enable_iterative_search', False):
-                  self.progress_callback("[INFO] Iterative search enabled, but RAG model is 'None'. Skipping follow-up query generation.")
+                  skip_msg = "Iterative search enabled, but RAG model is 'None'. Skipping follow-up query generation."
+                  send_progress(self.progress_callback, "log", {"level": "info", "message": skip_msg})
              # else: # Iterative search not enabled, do nothing extra
 
 
         # 5) Summaries and final RAG generation (Now uses potentially updated local_results)
-        self.progress_callback("Summarizing web results...")
-        # Summarization function now returns summary and reference links
+        send_progress(self.progress_callback, "phase_start", {"phase": "summarization", "message": "Summarizing results..."})
+        # Summarization functions should ideally use send_progress internally
+        send_progress(self.progress_callback, "status", {"message": "Summarizing web results..."})
         summarized_web, self._reference_links = summarization.summarize_web_results(
             self.web_results, self.config, self.resolved_settings, self.progress_callback, self.cache_manager # Pass cache_manager
         )
-        self.progress_callback("Summarizing local results...")
+        send_progress(self.progress_callback, "status", {"message": "Summarizing local results..."})
         summarized_local = summarization.summarize_local_results(
             self.local_results, self.config, self.resolved_settings, self.progress_callback, self.cache_manager # Pass cache_manager
         )
-        self.progress_callback("Building final report using RAG...")
+        send_progress(self.progress_callback, "phase_end", {"phase": "summarization", "message": "Finished summarizing results."})
+
+        send_progress(self.progress_callback, "phase_start", {"phase": "reporting", "message": "Building final report using RAG..."})
+        # Reporting function should ideally use send_progress internally
         final_answer = reporting.build_final_answer(
             enhanced_query=self.enhanced_query,
             toc_tree_nodes=self.toc_tree,
@@ -320,7 +400,7 @@ class SearchSession:
             include_visuals=self.include_visuals # Pass the stored setting
             # Pass previous_results_content, follow_up_convo if needed
         )
-        self.progress_callback("Finished building final report.")
+        send_progress(self.progress_callback, "phase_end", {"phase": "reporting", "message": "Finished building final report."})
         print("[INFO] Finished building final advanced report.")
         return final_answer
 

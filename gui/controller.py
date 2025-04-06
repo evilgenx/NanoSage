@@ -6,7 +6,7 @@ import logging
 import os
 import re # Keep re for refinement content extraction if needed here, or move if fully delegated
 from PyQt6.QtCore import QObject, pyqtSignal, Qt, QModelIndex
-from PyQt6.QtWidgets import QMessageBox, QMenu, QInputDialog
+from PyQt6.QtWidgets import QMessageBox, QMenu, QInputDialog, QDialog # Added QDialog
 
 # Import config loading utility
 from config_utils import load_config, save_config, DEFAULT_CONFIG
@@ -20,8 +20,9 @@ try:
     from .model_fetcher_manager import ModelFetcherManager
     from .scrape_dialog import ScrapeDialog # Import the new dialog
     from .workers import ScrapeWorker # Import the worker (will create later)
+    from .config_editor_dialog import ConfigEditorDialog # <<< Import the new config dialog
 except ImportError as e:
-    print(f"Error importing sub-controllers in controller.py: {e}")
+    print(f"Error importing sub-controllers/dialogs in controller.py: {e}")
     import sys
     sys.exit(1)
 
@@ -48,10 +49,16 @@ class GuiController(QObject):
         self.search_orchestrator.status_update.connect(self.log_status)
         self.search_orchestrator.search_process_complete.connect(self._handle_search_complete)
         self.search_orchestrator.search_process_error.connect(self._handle_search_error)
-        # Connect new orchestrator signals for TOC
-        self.search_orchestrator.search_started.connect(self.main_window._clear_toc_tree)
-        self.search_orchestrator.toc_node_added.connect(self.main_window._on_toc_node_added)
-        self.search_orchestrator.toc_node_updated.connect(self.main_window._on_toc_node_updated)
+        # Connect orchestrator signals for progress UI management
+        self.search_orchestrator.search_started.connect(self.main_window.reset_progress_ui) # Reset UI on start
+        # Assuming SearchOrchestrator relays the structured signal from the worker
+        self.search_orchestrator.structured_progress_update.connect(self.main_window.handle_structured_progress)
+        # Connect completion/error signals to finalize the progress UI
+        self.search_orchestrator.search_process_complete.connect(lambda: self.main_window.finalize_progress_ui(success=True))
+        self.search_orchestrator.search_process_error.connect(lambda: self.main_window.finalize_progress_ui(success=False))
+        # Remove direct TOC signal connections, handled by handle_structured_progress now
+        # self.search_orchestrator.toc_node_added.connect(self.main_window._on_toc_node_added)
+        # self.search_orchestrator.toc_node_updated.connect(self.main_window._on_toc_node_updated)
 
 
         self.result_display_manager.status_update.connect(self.log_status)
@@ -73,6 +80,8 @@ class GuiController(QObject):
 
         # Worker instance for scraping (managed directly by controller for now)
         self.scrape_worker = None
+        # Config editor dialog instance (create when needed)
+        self.config_editor_dialog = None # <<< Added instance variable
 
     def log_status(self, message):
         """Helper to call MainWindow's log_status."""
@@ -87,14 +96,17 @@ class GuiController(QObject):
         self.log_status("GuiController received search complete signal.")
         # Delegate display to ResultDisplayManager
         self.result_display_manager.display_results_and_toc(report_path, final_answer_content, toc_tree_nodes)
+        # Finalize UI is now handled by direct signal connection
 
     def _handle_search_error(self, error_message):
         """Handles search error signal from SearchOrchestrator."""
         self.log_status(f"GuiController received search error signal: {error_message}")
-        QMessageBox.critical(self.main_window, "Search Error", error_message)
+        # QMessageBox is now shown by handle_structured_progress for 'error' type
+        # QMessageBox.critical(self.main_window, "Search Error", error_message)
         # Optionally clear results or update status label via ResultDisplayManager
         self.result_display_manager.clear_results() # Example: clear results on error
         self.main_window.report_path_label.setText("Search failed.")
+        # Finalize UI is now handled by direct signal connection
 
 
     def _handle_refinement_request(self, anchor_id, instruction):
@@ -238,7 +250,97 @@ class GuiController(QObject):
         # self.main_window.cancel_button.setVisible(False)
         self.scrape_worker = None # Clear worker instance
 
+    # --- Config Editor Logic --- # <<< Added section
+    def show_config_editor(self):
+        """Creates and shows the configuration editor dialog."""
+        # Avoid opening multiple dialogs
+        if self.config_editor_dialog and self.config_editor_dialog.isVisible():
+            self.config_editor_dialog.raise_()
+            self.config_editor_dialog.activateWindow()
+            return
 
-# --- REMOVED ALL THE MOVED METHODS ---
-# (Query Enhancement, Topic Extraction, Model Fetching, Search Execution, Result Handling, Refinement Logic)
-# The SEARCH block should cover the removal of these methods implicitly by replacing the large block.
+        self.log_status("Opening configuration editor...")
+        # Pass the main window as parent
+        self.config_editor_dialog = ConfigEditorDialog(config_path=self.config_path, parent=self.main_window)
+        # Execute the dialog modally
+        result = self.config_editor_dialog.exec()
+
+        if result == QDialog.DialogCode.Accepted:
+            self.log_status("Configuration changes saved.")
+            # Reload config data in controller and main window
+            self.config_data = load_config(self.config_path)
+            self.main_window.config_data = self.config_data
+            # Apply changes to the main window UI
+            self._apply_saved_config()
+        else:
+            self.log_status("Configuration editing cancelled.")
+
+        # Clean up dialog reference
+        self.config_editor_dialog = None
+
+    def _apply_saved_config(self):
+        """Updates the main window UI elements based on the currently loaded self.config_data."""
+        self.log_status("Applying saved configuration to main window UI...")
+        try:
+            # Reload values into relevant main window widgets
+            # This mirrors the logic in MainWindow.__init__ for setting initial states
+
+            # General Tab Widgets
+            general_cfg = self.config_data.get('general', {})
+            self.main_window.web_search_checkbox.setChecked(general_cfg.get('web_search', True))
+            self.main_window.max_depth_spinbox.setValue(general_cfg.get('max_depth', 1))
+            self.main_window.device_combo.setCurrentText(general_cfg.get('device', 'cpu'))
+            self.main_window.corpus_dir_label.setText(general_cfg.get('corpus_dir', '') or '')
+
+            # Retrieval Tab Widgets
+            retrieval_cfg = self.config_data.get('retrieval', {})
+            self.main_window.top_k_spinbox.setValue(retrieval_cfg.get('top_k', 3))
+            # Handle embedding model change carefully, might need to trigger device change handler
+            current_embedding_model = retrieval_cfg.get('embedding_model', 'colpali')
+            if self.main_window.embedding_model_combo.currentText() != current_embedding_model:
+                 # Check if the model exists in the current list before setting
+                 if self.main_window.embedding_model_combo.findText(current_embedding_model) != -1:
+                     self.main_window.embedding_model_combo.setCurrentText(current_embedding_model)
+                 else:
+                     # If the saved model isn't valid for the current device, log warning
+                     self.log_status(f"[Warning] Saved embedding model '{current_embedding_model}' not available for device '{general_cfg.get('device', 'cpu')}'. UI might not reflect saved value.")
+
+            # Search Tab Widgets
+            search_cfg = self.config_data.get('search', {})
+            provider = search_cfg.get('provider', 'duckduckgo')
+            self.main_window.search_provider_combo.setCurrentText("DuckDuckGo" if provider == 'duckduckgo' else "SearXNG")
+            self.main_window.iterative_search_checkbox.setChecked(search_cfg.get('enable_iterative_search', False))
+            self.main_window.include_visuals_checkbox.setChecked(search_cfg.get('include_visuals', False))
+            # SearXNG specific fields
+            searxng_cfg = search_cfg.get('searxng', {})
+            self.main_window.searxng_base_url_input.setText(searxng_cfg.get('base_url', ''))
+            self.main_window.searxng_time_range_input.setText(searxng_cfg.get('time_range', '') or '')
+            self.main_window.searxng_categories_input.setText(searxng_cfg.get('categories', '') or '')
+            # Update SearXNG engine selector (if needed, though it reads config on init)
+            engines = searxng_cfg.get('engines', [])
+            if isinstance(engines, list):
+                self.main_window.searxng_engine_selector.setSelectedEngines(engines)
+            # Trigger visibility update
+            self.main_window.handle_search_provider_change(self.main_window.search_provider_combo.currentText())
+
+            # RAG Tab Widgets
+            llm_cfg = self.config_data.get('llm', {})
+            rag_type = llm_cfg.get('rag_model_type', 'gemma')
+            self.main_window.rag_model_combo.setCurrentText(rag_type)
+            self.main_window.personality_input.setText(llm_cfg.get('rag_personality', ''))
+            # Trigger RAG model change handler to update visibility and potentially model lists
+            self.main_window.handle_rag_model_change(rag_type)
+            # Note: We don't automatically re-fetch/re-select Gemini/OpenRouter models here,
+            # as the user might need to fetch them again if the API key changed.
+            # The UI state will reflect the saved *type*, but model selection might be cleared.
+
+            # Cache Tab Widget
+            cache_cfg = self.config_data.get('cache', {})
+            self.main_window.cache_enabled_checkbox.setChecked(cache_cfg.get('enabled', False))
+
+            self.log_status("Main window UI updated with saved configuration.")
+
+        except Exception as e:
+            self.log_status(f"[ERROR] Failed to apply saved configuration to UI: {e}")
+            logging.exception("Error applying saved config")
+            QMessageBox.warning(self.main_window, "UI Update Error", f"Could not fully update the main window UI with the saved settings: {e}")

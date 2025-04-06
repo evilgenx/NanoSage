@@ -112,6 +112,14 @@ Use the provided data to generate a report of at least 3000 words on the topic.
     'cache': {
         'enabled': False, # Default to disabled for safety/simplicity initially
         'db_path': "cache/nanosage_cache.db"
+    },
+    'knowledge_base': { # <<< Added section
+        'provider': 'chromadb', # Default to chromadb
+        'chromadb': {
+            'path': "./chroma_db",
+            'collection_name': "nanosage_kb",
+            # 'distance_function': "cosine" # Optional
+        }
     }
 }
 

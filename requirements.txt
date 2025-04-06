@@ -26,5 +26,8 @@ google-generativeai
 backoff # Added for retry logic in llm_utils
 accelerate>=0.26.0 # Required for transformers with device_map
 
+# Vector Database (Optional, for persistent KB)
+chromadb
+
 # Packaging
 pyinstaller
