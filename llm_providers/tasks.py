@@ -179,7 +179,13 @@ def summarize_text(text: str, llm_config: Dict[str, Any] = {}, max_chars: int = 
     # --- Handle Text <= Max Chars ---
     if len(text) <= max_chars:
         logger.debug(f"Summarizing text (<= {max_chars} chars) using {provider}...")
-        prompt = f"Please summarize the following text succinctly:\n\n{text}"
+        # Changed prompt to ask for more detail and key points
+        prompt = (
+            f"Analyze the following text and provide a detailed summary. "
+            f"Extract the key information, main arguments, and supporting details. "
+            f"Present the summary in a comprehensive paragraph format.\n\n"
+            f"Text:\n\"\"\"\n{text}\n\"\"\""
+        )
         summary = _call_selected_model(prompt)
 
         # Store in cache if successful
@@ -211,7 +217,13 @@ def summarize_text(text: str, llm_config: Dict[str, Any] = {}, max_chars: int = 
         else:
             # --- Generate Chunk Summary (Cache Miss) ---
             logger.debug(f"Summarizing chunk {i+1}/{len(chunks)} (cache miss)...")
-            prompt = f"Summarize part {i+1}/{len(chunks)}:\n\n{chunk}"
+            # Changed prompt to ask for detailed extraction from the chunk
+            prompt = (
+                f"Analyze the following text chunk, which is part {i+1} of {len(chunks)}. "
+                f"Extract the key information, main arguments, and supporting details from this specific chunk. "
+                f"Present the findings in a detailed paragraph format.\n\n"
+                f"Text Chunk:\n\"\"\"\n{chunk}\n\"\"\""
+            )
             summary = _call_selected_model(prompt)
 
             if not summary or summary.startswith("Error:"): # Propagate errors or handle empty summaries
@@ -248,7 +260,13 @@ def summarize_text(text: str, llm_config: Dict[str, Any] = {}, max_chars: int = 
         else:
             # --- Generate Final Combined Summary (Cache Miss) ---
             logger.info(f"Combining {len(summaries)} summaries into a final summary using {provider} (cache miss)...")
-            prompt = f"Combine these summaries into one concise final summary:\n\n{combined}"
+            # Changed prompt to ask for detailed synthesis
+            prompt = (
+                f"Synthesize the following individual summaries (derived from text chunks) into a single, coherent, and detailed overview. "
+                f"Ensure the final summary integrates the key information, arguments, and details from all parts, preserving nuance.\n\n"
+                f"Individual Summaries:\n\"\"\"\n{combined}\n\"\"\"\n\n"
+                f"Final Synthesized Summary:"
+            )
             final_summary = _call_selected_model(prompt)
 
             # --- Store Final Combined Summary in Cache ---

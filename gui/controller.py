@@ -48,6 +48,11 @@ class GuiController(QObject):
         self.search_orchestrator.status_update.connect(self.log_status)
         self.search_orchestrator.search_process_complete.connect(self._handle_search_complete)
         self.search_orchestrator.search_process_error.connect(self._handle_search_error)
+        # Connect new orchestrator signals for TOC
+        self.search_orchestrator.search_started.connect(self.main_window._clear_toc_tree)
+        self.search_orchestrator.toc_node_added.connect(self.main_window._on_toc_node_added)
+        self.search_orchestrator.toc_node_updated.connect(self.main_window._on_toc_node_updated)
+
 
         self.result_display_manager.status_update.connect(self.log_status)
         self.result_display_manager.refinement_requested.connect(self._handle_refinement_request) # Connect to new slot

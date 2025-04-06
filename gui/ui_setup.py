@@ -294,12 +294,12 @@ def setup_main_window_ui(main_window):
 
     toc_container_layout.addLayout(toc_buttons_layout) # Add button layout to container
 
-    # TOC Tree Widget
-    main_window.toc_tree_widget = QTreeView()
-    main_window.toc_tree_widget.setHeaderHidden(True) # Hide the default header
-    main_window.toc_tree_widget.setModel(QStandardItemModel()) # Set an empty model initially
-    main_window.toc_tree_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-    toc_container_layout.addWidget(main_window.toc_tree_widget) # Add tree below buttons
+    # TOC Tree Widget (Use the instance created in MainWindow)
+    # main_window.toc_tree_widget = QTreeView() # Removed: Instance created in MainWindow
+    # main_window.toc_tree_widget.setHeaderHidden(True) # Removed: Properties set in MainWindow
+    # main_window.toc_tree_widget.setModel(QStandardItemModel()) # Removed: Model set in MainWindow
+    main_window.toc_tree_view.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding) # Keep size policy setting if needed
+    toc_container_layout.addWidget(main_window.toc_tree_view) # Add the instance from MainWindow
 
     main_window.results_splitter.addWidget(toc_container_widget) # Add container to splitter
     # --- End Left side of Splitter ---

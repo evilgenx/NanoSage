@@ -9,9 +9,10 @@ import os
 import logging # Added logging
 from PyQt6.QtWidgets import (
     QMainWindow, QTextEdit, QPushButton, QLabel, QLineEdit, QComboBox, QSpinBox,
-    QCheckBox, QFileDialog, QMessageBox # Removed unused layout/widget imports
+    QCheckBox, QFileDialog, QMessageBox, QTreeView # Added QTreeView
 )
-# from PyQt6.QtCore import Qt # Removed unused Qt
+from PyQt6.QtCore import Qt # Added Qt for ItemDataRole
+from PyQt6.QtGui import QStandardItemModel, QStandardItem # Added for TreeView model
 # from PyQt6.QtGui import QIcon # Optional: for window icon
 
 # Import the new UI setup function
@@ -50,10 +51,29 @@ class MainWindow(QMainWindow):
 
         self.current_report_path = None
         self.current_results_dir = None
-        # self.cache_manager_instance = None # Cache manager interaction might move to controller too
+        self.toc_item_map = {} # Dictionary to map node_id to QStandardItem
 
         # Call the UI setup function from the separate module
         setup_main_window_ui(self)
+
+        # --- Setup TOC Tree View ---
+        self.toc_model = QStandardItemModel()
+        self.toc_tree_view = QTreeView()
+        self.toc_tree_view.setModel(self.toc_model)
+        self.toc_tree_view.setHeaderHidden(True) # Hide default header
+        # Add the TreeView to the results layout (assuming results_layout exists)
+        # If results_layout doesn't exist or isn't the right place, adjust this.
+        # It might be better in a separate tab or a dock widget.
+        if hasattr(self, 'results_layout'):
+            # Add TreeView above the results text edit
+            self.results_layout.insertWidget(0, QLabel("Search Progress (TOC):"))
+            self.results_layout.insertWidget(1, self.toc_tree_view)
+            # Adjust stretch factors if needed, e.g., give tree view less space initially
+            self.results_layout.setStretch(1, 1) # TreeView stretch factor
+            self.results_layout.setStretch(3, 3) # Results TextEdit stretch factor (assuming it's index 3 now)
+        else:
+            print("[WARN] results_layout not found in MainWindow. TOC TreeView not added.")
+        # --- End Setup TOC Tree View ---
 
         # Instantiate the controller
         self.controller = GuiController(self)
@@ -196,8 +216,95 @@ class MainWindow(QMainWindow):
         # Connect corpus clear button (handled by _save_current_settings_to_config on exit)
         self.corpus_clear_button.clicked.connect(self.clear_corpus_directory) # Still need the action
 
+        # --- TOC Signal Connections (Placeholder - Actual connection likely in Controller) ---
+        # These connections need to be established *after* the SearchWorker instance
+        # is created within the GuiController. The controller might re-emit these signals.
+        # self.controller.search_worker_created_signal.connect(self._connect_toc_signals) # Example signal
+        # Or connect directly if controller provides access:
+        # if self.controller.search_worker: # Check if worker exists
+        #     self.controller.search_worker.tocNodeAdded.connect(self._on_toc_node_added)
+        #     self.controller.search_worker.tocNodeUpdated.connect(self._on_toc_node_updated)
+        # Connect search started signal (assuming controller emits this)
+        # self.controller.search_started_signal.connect(self._clear_toc_tree)
+
 
     # --- Slot Methods (Keep UI-specific handlers) ---
+
+    def _clear_toc_tree(self):
+        """Clears the TOC tree view and the item map."""
+        self.toc_model.clear()
+        self.toc_item_map.clear()
+        # Optionally set column headers if needed, though header is hidden
+        # self.toc_model.setHorizontalHeaderLabels(['Topic', 'Status', 'Relevance'])
+
+    def _on_toc_node_added(self, node_data):
+        """Adds a new node to the TOC tree view."""
+        node_id = node_data.get("id")
+        parent_id = node_data.get("parent_id")
+        node_text = node_data.get("text", "N/A")
+        status = node_data.get("status", "")
+        relevance = node_data.get("relevance", "")
+
+        if not node_id:
+            self.log_status("[Error] Received toc_add signal with missing node ID.")
+            return
+
+        item = QStandardItem(f"{node_text} [{status}] (Rel: {relevance})")
+        item.setData(node_id, Qt.ItemDataRole.UserRole) # Store node_id in the item
+        item.setEditable(False)
+        # Set tooltip (optional)
+        item.setToolTip(f"ID: {node_id}\nStatus: {status}\nRelevance: {relevance}")
+
+        self.toc_item_map[node_id] = item
+
+        if parent_id and parent_id in self.toc_item_map:
+            parent_item = self.toc_item_map[parent_id]
+            parent_item.appendRow(item)
+        else:
+            # Add as a top-level item
+            self.toc_model.appendRow(item)
+
+        # Optional: Expand parent item?
+        # if parent_id and parent_id in self.toc_item_map:
+        #     parent_index = self.toc_model.indexFromItem(self.toc_item_map[parent_id])
+        #     if parent_index.isValid():
+        #         self.toc_tree_view.expand(parent_index)
+
+    def _on_toc_node_updated(self, node_id, updates):
+        """Updates an existing node in the TOC tree view."""
+        if node_id not in self.toc_item_map:
+            self.log_status(f"[Warning] Received toc_update for unknown node ID: {node_id}")
+            return
+
+        item = self.toc_item_map[node_id]
+
+        # Update item based on the 'updates' dictionary
+        # We need to reconstruct the display text based on potentially updated fields
+        current_data = item.data(Qt.ItemDataRole.UserRole + 1) # Get existing data if stored
+        if not isinstance(current_data, dict): current_data = {} # Initialize if not dict
+
+        # Update stored data
+        current_data.update(updates)
+        item.setData(current_data, Qt.ItemDataRole.UserRole + 1) # Store updated data (optional)
+
+        # Reconstruct display text (example, adjust as needed)
+        node_text = current_data.get("text", item.text().split(" [")[0]) # Try to keep original text if not updated
+        status = updates.get("status", current_data.get("status", "Unknown"))
+        relevance = updates.get("relevance", current_data.get("relevance", "N/A"))
+        content_relevance = updates.get("content_relevance", current_data.get("content_relevance", "N/A"))
+        summary_snippet = updates.get("summary_snippet", current_data.get("summary_snippet", ""))
+
+        display_text = f"{node_text} [{status}] (Rel: {relevance} / ContRel: {content_relevance})"
+        item.setText(display_text)
+
+        # Update tooltip
+        tooltip_text = f"ID: {node_id}\nStatus: {status}\nRelevance: {relevance}\nContent Rel: {content_relevance}"
+        if summary_snippet:
+            tooltip_text += f"\nSummary: {summary_snippet}"
+        item.setToolTip(tooltip_text)
+
+        # Optionally change icon or background color based on status
+        # e.g., if updates.get("status") == TOCNode.STATUS_DONE: item.setIcon(...)
 
     def update_result_actions_state(self, enabled):
         """Enables or disables result-related actions (buttons and menu items)."""

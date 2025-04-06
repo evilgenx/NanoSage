@@ -41,10 +41,18 @@ except ImportError as e:
 
 class SearchWorker(QThread):
     """Runs the SearchSession in a separate thread."""
-    progress_updated = pyqtSignal(str)
+    # Existing signals
+    progress_updated = pyqtSignal(str) # For general status messages
     # Emits: report_path (str), final_answer_content (str), toc_tree_nodes (list)
     search_complete = pyqtSignal(str, str, list)
     error_occurred = pyqtSignal(str)
+
+    # New signals for TOC visualization
+    # Emits node data dictionary (from TOCNode.to_dict())
+    tocNodeAdded = pyqtSignal(dict)
+    # Emits node_id (str) and dictionary of updated fields (e.g., {'status': 'Done', 'relevance': '0.85'})
+    tocNodeUpdated = pyqtSignal(str, dict)
+
 
     def __init__(self, params, parent=None):
         super().__init__(parent)
@@ -74,15 +82,44 @@ class SearchWorker(QThread):
         try:
             # Create a proxy object to safely emit signals from the asyncio loop
             class ProgressCallbackProxy(QObject):
+                # Keep existing signal for string messages
                 progress_signal = pyqtSignal(str)
+                # Add signals for structured TOC updates
+                toc_add_signal = pyqtSignal(dict)
+                toc_update_signal = pyqtSignal(str, dict)
 
                 def __call__(self, message):
-                    # Check cancellation before emitting progress
+                    # Check cancellation first
                     if self.parent().is_cancellation_requested():
-                         # Optional: could raise a specific exception here if needed
-                         # raise asyncio.CancelledError("Search cancelled by user")
-                         return # Or just stop emitting
-                    self.progress_signal.emit(message)
+                        return # Stop emitting if cancelled
+
+                    if isinstance(message, dict):
+                        # Handle structured messages
+                        msg_type = message.get("type")
+                        if msg_type == "toc_add":
+                            node_data = message.get("node_data", {})
+                            if node_data:
+                                self.toc_add_signal.emit(node_data)
+                        elif msg_type == "toc_update":
+                            node_id = message.get("node_id")
+                            # Create dict of updates, excluding 'type' and 'node_id'
+                            updates = {k: v for k, v in message.items() if k not in ["type", "node_id"]}
+                            if node_id and updates:
+                                self.toc_update_signal.emit(node_id, updates)
+                        elif msg_type == "status":
+                            status_msg = message.get("message", "")
+                            if status_msg:
+                                self.progress_signal.emit(status_msg)
+                        else:
+                            # Fallback for unknown dict types - maybe log?
+                            self.progress_signal.emit(f"[Worker] Received unknown structured message: {message}")
+                    elif isinstance(message, str):
+                        # Handle simple string messages
+                        self.progress_signal.emit(message)
+                    else:
+                        # Handle unexpected types
+                        self.progress_signal.emit(f"[Worker] Received unexpected progress type: {type(message)}")
+
 
                 def set_parent_worker(self, worker):
                     # Store reference to parent worker to access is_cancellation_requested
@@ -93,7 +130,10 @@ class SearchWorker(QThread):
 
             self._progress_callback_proxy = ProgressCallbackProxy()
             self._progress_callback_proxy.set_parent_worker(self) # Give proxy access to parent
+            # Connect the proxy's signals to the worker's signals
             self._progress_callback_proxy.progress_signal.connect(self.progress_updated.emit)
+            self._progress_callback_proxy.toc_add_signal.connect(self.tocNodeAdded.emit)
+            self._progress_callback_proxy.toc_update_signal.connect(self.tocNodeUpdated.emit)
 
 
             # Check cancellation before starting

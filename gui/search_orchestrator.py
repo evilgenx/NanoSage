@@ -29,6 +29,12 @@ class SearchOrchestrator(QObject):
     search_process_error = pyqtSignal(str)
     # Signal for status updates
     status_update = pyqtSignal(str)
+    # Signal emitted when the main search worker starts
+    search_started = pyqtSignal()
+    # New signals for TOC visualization, re-emitted from worker
+    toc_node_added = pyqtSignal(dict)
+    toc_node_updated = pyqtSignal(str, dict)
+
 
     def __init__(self, main_window, result_display_manager, config_path, parent=None):
         super().__init__(parent)
@@ -292,7 +298,22 @@ class SearchOrchestrator(QObject):
         self.search_worker.search_complete.connect(self.on_search_complete)
         self.search_worker.error_occurred.connect(self.on_search_error)
         self.search_worker.finished.connect(self.on_search_finished)
+        # Connect new TOC signals from worker to orchestrator's re-emitting slots
+        self.search_worker.tocNodeAdded.connect(self._on_worker_toc_node_added)
+        self.search_worker.tocNodeUpdated.connect(self._on_worker_toc_node_updated)
+
+        # Emit search started signal
+        self.search_started.emit()
         self.search_worker.start()
+
+    # --- Slots to re-emit TOC signals from worker ---
+    def _on_worker_toc_node_added(self, node_data):
+        """Re-emits the toc_node_added signal."""
+        self.toc_node_added.emit(node_data)
+
+    def _on_worker_toc_node_updated(self, node_id, updates):
+        """Re-emits the toc_node_updated signal."""
+        self.toc_node_updated.emit(node_id, updates)
 
     # --- Search Result Handling Slots ---
     def on_search_complete(self, report_path, final_answer_content, toc_tree_nodes):
