@@ -28,14 +28,21 @@ DEFAULT_CONFIG = {
     },
     'retrieval': {
         'retrieval_model': 'colpali',
-        'top_k': 3
+        'top_k': 3,
+        'embedding_model': 'local' # Added default
     },
     'llm': {
         'rag_model': 'gemma',
         'personality': 'cheerful assistant',
-        'gemma_model_id': 'gemma2:2b',
-        'gemini_model_id': 'models/gemini-1.5-flash-latest',
-        'openrouter_model_id': 'openai/gpt-3.5-turbo',
+        'rag_model_type': 'gemma', # Added for RAG tab selection
+        'selected_gemini_model': 'models/gemini-1.5-flash-latest', # Added for RAG tab selection
+        'selected_openrouter_model': 'openai/gpt-3.5-turbo', # Added for RAG tab selection
+        'rag_personality': 'cheerful assistant', # Added for RAG tab input
+        'selected_output_format': 'report', # Added for RAG tab selection (defaulting to 'report')
+        'gemma_model_id': 'gemma2:2b', # Kept for potential backend use, though UI might override
+        'gemini_model_id': 'models/gemini-1.5-flash-latest', # Kept for potential backend use
+        'openrouter_model_id': 'openai/gpt-3.5-turbo', # Kept for potential backend use
+        'personality': 'cheerful assistant', # Kept for potential backend use
         'rag_report_prompt_template': """You are an expert research analyst tasked with creating a comprehensive, well-structured report.
 Use the provided data to generate a report of at least 3000 words on the topic.
 

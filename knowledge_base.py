@@ -5,6 +5,7 @@
 import os
 import torch
 import numpy as np
+import logging # Add logging import
 
 # New imports for refactored structure
 from embeddings.base import BaseEmbedder
@@ -145,6 +146,47 @@ class KnowledgeBase:
              else:
                  print("[WARN] Skipping document entry with missing or None embedding.")
         self._progress(f"Added {count} pre-computed document entries.")
+
+    def add_scraped_content(self, url: str, markdown_content: str):
+        """
+        Embeds scraped Markdown content and adds it to the knowledge base.
+
+        Args:
+            url (str): The source URL of the scraped content.
+            markdown_content (str): The scraped content in Markdown format.
+        """
+        if not markdown_content or not markdown_content.strip():
+            self._progress(f"[WARN] Skipping empty scraped content from {url}.")
+            return False
+
+        self._progress(f"Embedding scraped content from: {url}")
+        try:
+            emb = self.embedder.embed(markdown_content)
+
+            if emb is None:
+                self._progress(f"[WARN] Failed to generate embedding for scraped content from {url}. Skipping.")
+                return False
+
+            # Create metadata
+            snippet = markdown_content[:150].replace('\n', ' ').strip() + "..."
+            metadata = {
+                "source_url": url,
+                "type": "web_scrape",
+                "snippet": snippet
+            }
+
+            # Add to corpus
+            self.corpus.append({
+                "embedding": emb.cpu(), # Ensure CPU
+                "metadata": metadata
+            })
+            self._progress(f"Successfully added scraped content from {url} to knowledge base.")
+            return True
+
+        except Exception as e:
+            self._progress(f"[ERROR] Failed to process scraped content from {url}: {e}")
+            logging.error(f"Error processing scraped content from {url}:", exc_info=True)
+            return False
 
 
     def search(self, query: str, top_k: int = 3) -> list:

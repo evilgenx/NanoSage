@@ -4,6 +4,8 @@
 import os
 import asyncio
 import traceback
+import re # Added for filename sanitization
+import urllib.parse # Added for filename sanitization
 from PyQt6.QtCore import QThread, pyqtSignal, QObject, QMutex, QMutexLocker # Added Mutex
 
 # Assuming search_session, llm_utils, and config_utils are accessible from the parent directory
@@ -17,7 +19,16 @@ try:
         extract_topics_from_text, chain_of_thought_query_enhancement,
         refine_text_section # Added refine_text_section
     )
-    from config_utils import load_config, save_config
+    from config_utils import load_config, save_config, DEFAULT_CONFIG # Added DEFAULT_CONFIG
+    # Imports needed for ScrapeWorker
+    from web_scraper import scrape_url_to_markdown, can_fetch, DEFAULT_USER_AGENT # Added can_fetch, DEFAULT_USER_AGENT
+    from knowledge_base import KnowledgeBase
+    from embeddings.factory import create_embedder
+    # Additional imports for recursive scraping
+    import requests
+    from bs4 import BeautifulSoup
+    from urllib.parse import urljoin, urlparse
+    import time
 except ImportError as e:
     # This error might be better handled by the main application window
     # or logged, rather than exiting here.
@@ -404,3 +415,242 @@ class RefinementWorker(QThread):
             error_msg = f"An unexpected error occurred during refinement for section '{self.anchor_id}': {e}"
             self.status_update.emit(f"[Error] {error_msg}")
             self.refinement_error.emit(self.anchor_id, error_msg)
+
+
+class ScrapeWorker(QThread):
+    """Scrapes a URL and adds its content to the knowledge base."""
+    status_update = pyqtSignal(str)
+    # Emits URL and a snippet of the scraped content on success
+    scrape_complete = pyqtSignal(str, str)
+    # Emits URL and error message on failure
+    scrape_error = pyqtSignal(str, str)
+
+    def __init__(self, url, ignore_robots, depth, embedding_model, device, parent=None): # Added depth
+        super().__init__(parent)
+        self.url = url
+        self.ignore_robots = ignore_robots
+        self.depth = depth # Store depth
+        self.embedding_model = embedding_model
+        self.device = device
+        self._mutex = QMutex()
+        self._cancellation_requested = False # Basic cancellation flag
+
+    def stop(self):
+        """Request cancellation."""
+        # Basic cancellation for now, more robust mechanism might be needed
+        # depending on where the time is spent (requests vs embedding)
+        with QMutexLocker(self._mutex):
+            self._cancellation_requested = True
+        self.status_update.emit("Scrape cancellation requested.")
+
+    def _is_cancelled(self):
+        """Check cancellation flag."""
+        with QMutexLocker(self._mutex):
+            return self._cancellation_requested
+
+    def _scrape_recursively(self, start_url, max_depth, respect_robots):
+        """Helper function to perform recursive scraping."""
+        visited = set()
+        urls_to_scrape = [(start_url, 0)] # Queue of (url, current_depth)
+        all_markdown_content = ""
+        scraped_count = 0
+        max_pages_to_scrape = 20 # Safety limit to prevent excessive scraping
+
+        while urls_to_scrape and scraped_count < max_pages_to_scrape:
+            if self._is_cancelled():
+                self.status_update.emit("Scraping cancelled during recursion.")
+                return None, "Cancelled"
+
+            current_url, current_depth = urls_to_scrape.pop(0)
+
+            if current_url in visited:
+                continue
+
+            if current_depth > max_depth:
+                continue
+
+            visited.add(current_url)
+            self.status_update.emit(f"Scraping (Depth {current_depth}): {current_url}")
+
+            # Use the existing scrape_url_to_markdown for individual pages
+            markdown_content, error_msg = scrape_url_to_markdown(
+                url=current_url,
+                respect_robots=respect_robots
+            )
+
+            if error_msg:
+                self.status_update.emit(f"[Warning] Failed to scrape {current_url}: {error_msg}")
+                continue # Skip this URL, but continue with others
+
+            if markdown_content:
+                all_markdown_content += f"\n\n## Content from: {current_url}\n\n" + markdown_content
+                scraped_count += 1
+
+                # Find links if we need to go deeper
+                if current_depth < max_depth:
+                    try:
+                        # Need to fetch again to parse HTML for links (scrape_url_to_markdown only returns markdown)
+                        headers = {'User-Agent': DEFAULT_USER_AGENT}
+                        response = requests.get(current_url, headers=headers, timeout=15)
+                        response.raise_for_status()
+                        content_type = response.headers.get('content-type', '').lower()
+
+                        if 'html' in content_type:
+                            soup = BeautifulSoup(response.content, 'lxml')
+                            base_url_parts = urlparse(current_url)
+
+                            for link in soup.find_all('a', href=True):
+                                href = link['href']
+                                next_url = urljoin(current_url, href)
+                                # Basic validation: same domain, http/https, not an anchor
+                                next_url_parts = urlparse(next_url)
+                                if (next_url_parts.scheme in ['http', 'https'] and
+                                        next_url_parts.netloc == base_url_parts.netloc and
+                                        next_url not in visited and
+                                        '#' not in next_url): # Avoid fragments
+
+                                    # Check robots.txt for the next URL before adding
+                                    if respect_robots:
+                                        time.sleep(0.1) # Small delay
+                                        if not can_fetch(next_url):
+                                            self.status_update.emit(f"[Info] Skipping disallowed link: {next_url}")
+                                            continue
+
+                                    if (next_url, current_depth + 1) not in urls_to_scrape:
+                                         urls_to_scrape.append((next_url, current_depth + 1))
+                        else:
+                            self.status_update.emit(f"[Info] Skipping link extraction (non-HTML): {current_url}")
+
+                    except requests.exceptions.RequestException as e:
+                        self.status_update.emit(f"[Warning] Failed to fetch {current_url} for link extraction: {e}")
+                    except Exception as e:
+                         self.status_update.emit(f"[Warning] Error extracting links from {current_url}: {e}")
+
+            time.sleep(0.2) # Be polite between scrapes
+
+        if scraped_count >= max_pages_to_scrape:
+             self.status_update.emit(f"[Warning] Reached maximum page limit ({max_pages_to_scrape}). Stopping recursion.")
+
+        return all_markdown_content, None # Return aggregated content
+
+
+    def run(self):
+        """Executes the scraping (potentially recursive) and knowledge base addition."""
+        try:
+            self.status_update.emit(f"Initializing components for scraping {self.url} (Depth: {self.depth})...")
+
+            # 1. Initialize Embedder
+            # Note: This might be slow depending on the model. Consider if KB should be shared.
+            # For now, create instances here.
+            def embedder_progress(msg): self.status_update.emit(f"[Embedder] {msg}")
+            # Corrected indentation for the create_embedder call and subsequent lines
+            embedder = create_embedder(
+                embedding_model_name=self.embedding_model, # Corrected parameter name
+                device=self.device,
+                # Note: create_embedder doesn't accept progress_callback directly
+                # Progress is handled internally or via cache_manager if implemented
+            )
+            if not embedder:
+                raise ValueError("Embedder creation failed.")
+            self.status_update.emit(f"Embedder '{self.embedding_model}' initialized on {self.device}.")
+
+            if self._is_cancelled():
+                return
+
+            # 2. Initialize Knowledge Base (In-memory for now)
+            # WARNING: This KB instance is temporary and local to this worker.
+            # The scraped content will only exist in memory during the app's runtime
+            # unless persistence is added to the KnowledgeBase class itself or
+            # the main application manages a persistent KB instance passed to workers.
+            def kb_progress(msg): self.status_update.emit(f"[KnowledgeBase] {msg}")
+            kb = KnowledgeBase(embedder=embedder, progress_callback=kb_progress)
+            self.status_update.emit("Temporary in-memory KnowledgeBase initialized.")
+
+            if self._is_cancelled():
+                return
+
+            # 3. Perform Scraping (potentially recursive)
+            self.status_update.emit(f"Starting scrape for {self.url} (Depth: {self.depth}, Ignore robots: {self.ignore_robots})")
+
+            # Call the recursive helper or the single scrape function based on depth
+            if self.depth == 0:
+                # Original single-page scrape
+                markdown_content, error_msg = scrape_url_to_markdown(
+                    url=self.url,
+                    respect_robots=not self.ignore_robots
+                )
+            else:
+                # New recursive scrape
+                markdown_content, error_msg = self._scrape_recursively(
+                    start_url=self.url,
+                    max_depth=self.depth,
+                    respect_robots=not self.ignore_robots
+                )
+
+
+            if self._is_cancelled():
+                return
+
+            # 4. Add to Knowledge Base if successful
+            if error_msg:
+                # Handle cancellation message specifically
+                if error_msg == "Cancelled":
+                    self.status_update.emit(f"Scraping cancelled for {self.url}.")
+                    # Don't emit scrape_error for user cancellation
+                else:
+                    self.scrape_error.emit(self.url, error_msg)
+            elif markdown_content:
+                self.status_update.emit("Scraping successful. Saving aggregated content and adding to knowledge base...")
+
+                # --- Save aggregated scraped content to file ---
+                output_dir = "scraped_markdown"
+                try:
+                    os.makedirs(output_dir, exist_ok=True)
+
+                    # Sanitize URL to create a safe filename
+                    parsed_url = urllib.parse.urlparse(self.url)
+                    # Use netloc + path, replace slashes, remove scheme
+                    filename_base = f"{parsed_url.netloc}{parsed_url.path}".replace('/', '_').replace(':', '_')
+                    # Remove potentially problematic characters
+                    filename_base = re.sub(r'[^\w\-_\.]', '', filename_base)
+                    # Truncate if too long (optional, but good practice)
+                    filename_base = filename_base[:100]
+                    # Add depth indication to filename if recursive
+                    depth_suffix = f"_depth{self.depth}" if self.depth > 0 else ""
+                    filename = f"{filename_base}{depth_suffix}.md"
+                    filepath = os.path.join(output_dir, filename)
+
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        f.write(markdown_content)
+                    self.status_update.emit(f"Aggregated scraped content saved to: {filepath}")
+
+                except Exception as e:
+                    self.status_update.emit(f"[Error] Failed to save aggregated scraped content to file: {e}")
+                    # Continue to add to KB even if saving fails? Or emit error?
+                    # For now, just log and continue.
+
+                # --- Add aggregated content to Knowledge Base ---
+                # Use the starting URL as the identifier for the aggregated content
+                success = kb.add_scraped_content(self.url, markdown_content)
+
+                if self._is_cancelled():
+                    return
+
+                if success:
+                    snippet = markdown_content[:150].replace('\n', ' ') + "..." # Slightly longer snippet for aggregated content
+                    self.scrape_complete.emit(self.url, snippet)
+                    # Removed the inaccurate warning about in-memory KB loss
+                else:
+                    self.scrape_error.emit(self.url, "Failed to add aggregated scraped content to the knowledge base.")
+            else:
+                 # Check if error_msg was set (e.g., "Cancelled") before emitting generic error
+                 if not error_msg:
+                     self.scrape_error.emit(self.url, "Scraping returned no content and no specific error.")
+
+        except Exception as e:
+            if self._is_cancelled():
+                self.status_update.emit("Scraping cancelled during exception handling.")
+                return
+            traceback.print_exc()
+            self.scrape_error.emit(self.url, f"An unexpected error occurred: {e}")
+        # Removed extra lines causing indentation errors at the end of the try block

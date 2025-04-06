@@ -18,8 +18,8 @@ try:
     from .result_display_manager import ResultDisplayManager
     from .refinement_controller import RefinementController
     from .model_fetcher_manager import ModelFetcherManager
-    # Keep worker import only if GuiController directly uses any (likely not after refactor)
-    # from .workers import ...
+    from .scrape_dialog import ScrapeDialog # Import the new dialog
+    from .workers import ScrapeWorker # Import the worker (will create later)
 except ImportError as e:
     print(f"Error importing sub-controllers in controller.py: {e}")
     import sys
@@ -65,6 +65,9 @@ class GuiController(QObject):
         self.main_window.gemini_fetch_button.clicked.connect(self.model_fetcher_manager.fetch_gemini_models)
         self.main_window.openrouter_fetch_button.clicked.connect(self.model_fetcher_manager.fetch_openrouter_models)
         self.main_window.clear_cache_button.clicked.connect(self.clear_cache) # Keep cache clear here
+
+        # Worker instance for scraping (managed directly by controller for now)
+        self.scrape_worker = None
 
     def log_status(self, message):
         """Helper to call MainWindow's log_status."""
@@ -163,7 +166,73 @@ class GuiController(QObject):
         self.refinement_controller.shutdown_worker()
         self.model_fetcher_manager.shutdown_workers()
         # Add shutdown for ResultDisplayManager if it ever gets workers
+        if self.scrape_worker and self.scrape_worker.isRunning():
+            self.log_status("Stopping active scrape worker...")
+            self.scrape_worker.stop() # Assuming worker has a stop method
+            self.scrape_worker.wait() # Wait for it to finish cleanly
+            self.log_status("Scrape worker stopped.")
         self.log_status("All worker shutdown routines called.")
+
+    # --- Scraping Dialog and Logic ---
+
+    def show_scrape_dialog(self):
+        """Shows the dialog to get URL and options for scraping."""
+        if self.scrape_worker and self.scrape_worker.isRunning():
+             QMessageBox.warning(self.main_window, "Busy", "A scraping process is already running.")
+             return
+
+        dialog = ScrapeDialog(self.main_window)
+        if dialog.exec():
+            values = dialog.get_values()
+            if values:
+                self.log_status(f"Starting scrape for URL: {values['url']} with depth {values['depth']}")
+                # Pass the depth value to the worker starter
+                self._start_scrape_worker(values['url'], values['ignore_robots'], values['depth'])
+
+    def _start_scrape_worker(self, url, ignore_robots, depth): # Added depth parameter
+        """Initializes and starts the ScrapeWorker."""
+        # Disable scrape menu item? Or handle busy state check in show_scrape_dialog
+        self.main_window.progress_bar.setRange(0, 0) # Indeterminate progress
+        self.main_window.progress_bar.setVisible(True)
+        self.main_window.run_button.setEnabled(False) # Disable run during scrape
+        # self.main_window.cancel_button.setEnabled(True) # Enable cancel? Need cancel logic in worker
+
+        # Reload config to get current embedding settings
+        self.config_data = load_config(self.config_path)
+        embedding_model = self.config_data.get('retrieval', {}).get('embedding_model', DEFAULT_CONFIG['retrieval']['embedding_model'])
+        device = self.config_data.get('general', {}).get('device', DEFAULT_CONFIG['general']['device'])
+
+        # Pass depth to the ScrapeWorker constructor
+        self.scrape_worker = ScrapeWorker(url, ignore_robots, depth, embedding_model, device)
+        self.scrape_worker.status_update.connect(self.log_status)
+        self.scrape_worker.scrape_complete.connect(self._handle_scrape_complete)
+        self.scrape_worker.scrape_error.connect(self._handle_scrape_error)
+        self.scrape_worker.finished.connect(self._scrape_worker_finished) # Generic finished signal
+        self.scrape_worker.start()
+
+    def _handle_scrape_complete(self, url, content_snippet):
+        """Handles successful completion of the scraping process."""
+        self.log_status(f"Successfully scraped and added content from {url} to knowledge base.")
+        QMessageBox.information(self.main_window, "Scrape Complete",
+                                f"Successfully scraped and added content from:\n{url}\n\nSnippet:\n{content_snippet}...")
+        # UI reset is handled in _scrape_worker_finished
+
+    def _handle_scrape_error(self, url, error_message):
+        """Handles errors during the scraping process."""
+        self.log_status(f"[ERROR] Scraping failed for {url}: {error_message}")
+        QMessageBox.critical(self.main_window, "Scrape Error",
+                             f"Failed to scrape content from:\n{url}\n\nError: {error_message}")
+        # UI reset is handled in _scrape_worker_finished
+
+    def _scrape_worker_finished(self):
+        """Resets UI elements after the scrape worker finishes (success or error)."""
+        self.log_status("Scrape worker finished.")
+        self.main_window.progress_bar.setVisible(False)
+        self.main_window.run_button.setEnabled(True)
+        # self.main_window.cancel_button.setEnabled(False)
+        # self.main_window.cancel_button.setVisible(False)
+        self.scrape_worker = None # Clear worker instance
+
 
 # --- REMOVED ALL THE MOVED METHODS ---
 # (Query Enhancement, Topic Extraction, Model Fetching, Search Execution, Result Handling, Refinement Logic)

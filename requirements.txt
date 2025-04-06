@@ -11,6 +11,7 @@ aiohttp
 duckduckgo_search
 beautifulsoup4
 lxml     # Parser engine for BeautifulSoup
+markdownify # For HTML to Markdown conversion
 python-docx # For DOCX parsing
 pymupdf  # PyMuPDF for PDF handling
 pytesseract

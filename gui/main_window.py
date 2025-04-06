@@ -24,6 +24,8 @@ from . import result_actions # Import the module
 from config_utils import load_config, save_config, DEFAULT_CONFIG # Added DEFAULT_CONFIG
 from cache_manager import CacheManager # Added CacheManager import
 
+from PyQt6.QtGui import QAction # Import QAction for menu items
+
 # Import the selector widget (though it's created in ui_setup, we need its type potentially)
 # from .ui_components.searxng_selector import SearxngEngineSelector # Not strictly needed here if only interacting via ui_setup attributes
 
@@ -85,19 +87,26 @@ class MainWindow(QMainWindow):
         self.device_combo.setCurrentText(default_embedding_device) # Set combo
         self.handle_device_change(default_embedding_device) # Trigger model list update
 
-        # Initial RAG model state (call handler)
-        default_rag_model = self.config_data.get('rag', {}).get('model', 'None') # Example config structure
-        self.rag_model_combo.setCurrentText(default_rag_model)
-        self.handle_rag_model_change(default_rag_model) # Trigger visibility updates
+        # Initial RAG model state (load from new config keys)
+        llm_config_init = self.config_data.get('llm', {}) # Get LLM config once
+        default_rag_model_type = llm_config_init.get('rag_model_type', 'gemma')
+        self.rag_model_combo.setCurrentText(default_rag_model_type)
+        self.handle_rag_model_change(default_rag_model_type) # Trigger visibility updates
+
+        # Load RAG personality
+        self.personality_input.setText(llm_config_init.get('rag_personality', ''))
+        # Note: Selected Gemini/OpenRouter models are stored in config but applied after fetching.
 
         # Set other config-dependent initial states if any (e.g., checkbox, spinboxes)
-        search_config_init = self.config_data.get('search', {}) # Get search config once
-        self.web_search_checkbox.setChecked(search_config_init.get('web_search_enabled', True)) # Example
-        self.iterative_search_checkbox.setChecked(search_config_init.get('enable_iterative_search', False)) # Initialize new checkbox
-        self.max_depth_spinbox.setValue(search_config_init.get('max_depth', 1))
-        self.top_k_spinbox.setValue(search_config_init.get('top_k', 3))
-        self.corpus_dir_label.setText(self.config_data.get('corpus', {}).get('path', '')) # Example
-        self.personality_input.setText(self.config_data.get('rag', {}).get('personality', ''))
+        general_config_init = self.config_data.get('general', {}) # Get general config
+        retrieval_config_init = self.config_data.get('retrieval', {}) # Get retrieval config
+        search_config_init = self.config_data.get('search', {}) # Get search config
+
+        self.web_search_checkbox.setChecked(general_config_init.get('web_search', True))
+        self.iterative_search_checkbox.setChecked(search_config_init.get('enable_iterative_search', False)) # Assuming this key exists or add default
+        self.max_depth_spinbox.setValue(general_config_init.get('max_depth', 1))
+        self.top_k_spinbox.setValue(retrieval_config_init.get('top_k', 3))
+        self.corpus_dir_label.setText(general_config_init.get('corpus_dir', '') or '') # Use general config
 
         # Cache settings initialization
         cache_config_init = self.config_data.get('cache', {})
@@ -108,9 +117,13 @@ class MainWindow(QMainWindow):
         output_formats_config = self.config_data.get('llm', {}).get('output_formats', {})
         if output_formats_config:
             self.output_format_combo.addItems(output_formats_config.keys())
-            # Optionally set a default, e.g., 'Report' if it exists
-            if "Report" in output_formats_config:
-                self.output_format_combo.setCurrentText("Report")
+            # Set selected output format from config
+            selected_format = llm_config_init.get('selected_output_format', 'report') # Default to 'report'
+            if selected_format in output_formats_config:
+                self.output_format_combo.setCurrentText(selected_format)
+            elif self.output_format_combo.count() > 0:
+                 # If saved format not found, select the first available one
+                 self.output_format_combo.setCurrentIndex(0)
         else:
             self.log_status("[Warning] No 'output_formats' found in config.yaml under 'llm'. Dropdown will be empty.")
             self.output_format_combo.setEnabled(False)
@@ -119,7 +132,26 @@ class MainWindow(QMainWindow):
         # Connect signals after UI is fully set up and initialized
         self._connect_signals()
 
+        # --- Create Menu Bar ---
+        self._create_menu_bar()
+
     # _init_ui method is now removed
+
+    def _create_menu_bar(self):
+        """Creates the main menu bar."""
+        menu_bar = self.menuBar()
+        # File Menu (Example - if needed later)
+        # file_menu = menu_bar.addMenu("&File")
+        # exit_action = QAction("E&xit", self)
+        # exit_action.triggered.connect(self.close)
+        # file_menu.addAction(exit_action)
+
+        # Tools Menu
+        tools_menu = menu_bar.addMenu("&Tools")
+        scrape_action = QAction("&Scrape URL...", self)
+        # Connect to a controller method (to be created)
+        scrape_action.triggered.connect(self.controller.show_scrape_dialog)
+        tools_menu.addAction(scrape_action)
 
     def _connect_signals(self):
         """Connect UI signals to slots in the controller or result actions."""
@@ -143,11 +175,11 @@ class MainWindow(QMainWindow):
         self.searxng_engine_selector.selectionChanged.connect(self._handle_searxng_engine_selection_change)
         # Connect cancel button to controller
         self.cancel_button.clicked.connect(self.controller.cancel_current_operation)
-        # Connect cache controls (still handled locally/via controller)
-        self.cache_enabled_checkbox.stateChanged.connect(self._handle_cache_enabled_change)
+        # Connect cache controls (handled by _save_current_settings_to_config on exit)
+        # self.cache_enabled_checkbox.stateChanged.connect(self._handle_cache_enabled_change) # No longer needed for immediate save
         self.clear_cache_button.clicked.connect(self.controller.clear_cache) # Connect clear button to controller
-        # Connect corpus clear button
-        self.corpus_clear_button.clicked.connect(self.clear_corpus_directory)
+        # Connect corpus clear button (handled by _save_current_settings_to_config on exit)
+        self.corpus_clear_button.clicked.connect(self.clear_corpus_directory) # Still need the action
 
 
     # --- Slot Methods (Keep UI-specific handlers) ---
@@ -162,12 +194,13 @@ class MainWindow(QMainWindow):
 
         self.config_data['search']['searxng']['engines'] = selected_engines
 
-        # Save the updated config
-        if save_config(self.config_path, self.config_data):
-            self.log_status(f"SearXNG engine selection saved to {self.config_path}")
-        else:
-            self.log_status(f"[ERROR] Failed to save configuration to {self.config_path}")
-            QMessageBox.warning(self, "Config Error", f"Could not save engine selection to {self.config_path}")
+        # Config is now saved on exit, no immediate save needed here
+        # if save_config(self.config_path, self.config_data):
+        #     self.log_status(f"SearXNG engine selection updated in config (will save on exit)")
+        # else:
+        #     self.log_status(f"[ERROR] Failed to update config data in memory.")
+        #     QMessageBox.warning(self, "Config Error", f"Could not update engine selection in memory.")
+        pass # No immediate save action needed
 
     def handle_search_provider_change(self, provider_text):
         """Show/hide SearXNG specific settings."""
@@ -215,26 +248,22 @@ class MainWindow(QMainWindow):
             # Optionally update config immediately or let controller handle it before search
             # if 'corpus' not in self.config_data: self.config_data['corpus'] = {}
             # self.config_data['corpus']['path'] = directory
-            # Optionally update config immediately or let controller handle it before search
-            # We will save it here for immediate effect
-            if 'corpus' not in self.config_data: self.config_data['corpus'] = {}
-            self.config_data['corpus']['path'] = directory
-            if save_config(self.config_path, self.config_data):
-                self.log_status(f"Corpus directory saved to {self.config_path}")
-            else:
-                self.log_status(f"[ERROR] Failed to save corpus directory to {self.config_path}")
-                QMessageBox.warning(self, "Config Error", f"Could not save corpus directory to {self.config_path}")
+            # Update config in memory, save on exit
+            if 'general' not in self.config_data: self.config_data['general'] = {}
+            self.config_data['general']['corpus_dir'] = directory
+            self.log_status(f"Corpus directory set to: {directory} (will save on exit)")
+            # No immediate save needed here
+            # if save_config(self.config_path, self.config_data): ...
 
     def clear_corpus_directory(self):
         """Clear the selected corpus directory path."""
         self.corpus_dir_label.setText("")
-        if 'corpus' not in self.config_data: self.config_data['corpus'] = {}
-        self.config_data['corpus']['path'] = "" # Set path to empty string
-        if save_config(self.config_path, self.config_data):
-            self.log_status("Corpus directory cleared and saved.")
-        else:
-            self.log_status(f"[ERROR] Failed to save cleared corpus directory to {self.config_path}")
-            QMessageBox.warning(self, "Config Error", f"Could not save cleared corpus directory to {self.config_path}")
+        # Update config in memory, save on exit
+        if 'general' not in self.config_data: self.config_data['general'] = {}
+        self.config_data['general']['corpus_dir'] = "" # Set path to empty string
+        self.log_status("Corpus directory cleared (will save on exit)")
+        # No immediate save needed here
+        # if save_config(self.config_path, self.config_data): ...
 
 
     def handle_rag_model_change(self, model_name):
@@ -281,19 +310,10 @@ class MainWindow(QMainWindow):
     # def _start_main_search_worker(self, query_to_use): ...
 
     # --- Cache Handling ---
-    def _handle_cache_enabled_change(self, state):
-        """Update config when cache enabled checkbox changes."""
-        # This logic remains here as it directly affects the config this window manages
-        enabled = (state == 2) # 2 means checked
-        if 'cache' not in self.config_data: self.config_data['cache'] = {}
-        self.config_data['cache']['enabled'] = enabled
-        if save_config(self.config_path, self.config_data):
-            self.log_status(f"Cache setting saved to {self.config_path} (Enabled: {enabled})")
-        else:
-            self.log_status(f"[ERROR] Failed to save cache setting to {self.config_path}")
-            QMessageBox.warning(self, "Config Error", f"Could not save cache setting to {self.config_path}")
+    # Cache enabled state is now saved on exit via _save_current_settings_to_config
+    # def _handle_cache_enabled_change(self, state): ... # No longer needed
 
-    # clear_cache is now handled by the controller via button signal
+    # clear_cache is handled by the controller via button signal
 
     # _start_main_search_worker is moved to GuiController
 
@@ -311,8 +331,72 @@ class MainWindow(QMainWindow):
 
     # Result action methods (open_report, open_results_folder, share_report_email) are moved to result_actions.py
 
+    # --- Configuration Saving ---
+    def _save_current_settings_to_config(self):
+        """Gather current UI settings and update self.config_data."""
+        try:
+            # General Tab
+            if 'general' not in self.config_data: self.config_data['general'] = {}
+            self.config_data['general']['web_search'] = self.web_search_checkbox.isChecked()
+            self.config_data['general']['corpus_dir'] = self.corpus_dir_label.text()
+            self.config_data['general']['max_depth'] = self.max_depth_spinbox.value()
+            # Assuming device is under general now based on DEFAULT_CONFIG structure? Check config_utils.py if needed.
+            # If device is still under 'embeddings', adjust accordingly. Let's assume 'general' for now.
+            self.config_data['general']['device'] = self.device_combo.currentText()
+
+            # Retrieval Tab (assuming top_k is here)
+            if 'retrieval' not in self.config_data: self.config_data['retrieval'] = {}
+            self.config_data['retrieval']['top_k'] = self.top_k_spinbox.value()
+            # Assuming embedding_model is under retrieval
+            self.config_data['retrieval']['embedding_model'] = self.embedding_model_combo.currentText()
+
+            # Search Tab
+            if 'search' not in self.config_data: self.config_data['search'] = {}
+            self.config_data['search']['provider'] = self.search_provider_combo.currentText().lower() # Save as lowercase
+            self.config_data['search']['enable_iterative_search'] = self.iterative_search_checkbox.isChecked() # Save iterative search state
+            if 'searxng' not in self.config_data['search']: self.config_data['search']['searxng'] = {}
+            self.config_data['search']['searxng']['base_url'] = self.searxng_base_url_input.text()
+            self.config_data['search']['searxng']['time_range'] = self.searxng_time_range_input.text() or None # Save None if empty
+            self.config_data['search']['searxng']['categories'] = self.searxng_categories_input.text() or None # Save None if empty
+            self.config_data['search']['searxng']['engines'] = self.searxng_engine_selector.getSelectedEngines()
+
+            # RAG Tab (LLM section)
+            if 'llm' not in self.config_data: self.config_data['llm'] = {}
+            self.config_data['llm']['rag_model_type'] = self.rag_model_combo.currentText()
+            self.config_data['llm']['rag_personality'] = self.personality_input.text()
+            self.config_data['llm']['selected_output_format'] = self.output_format_combo.currentText()
+            # Save the currently selected model IDs if the combo boxes have items
+            if self.gemini_model_combo.count() > 0:
+                 self.config_data['llm']['selected_gemini_model'] = self.gemini_model_combo.currentText()
+            if self.openrouter_model_combo.count() > 0:
+                 self.config_data['llm']['selected_openrouter_model'] = self.openrouter_model_combo.currentText()
+
+            # Cache Tab
+            if 'cache' not in self.config_data: self.config_data['cache'] = {}
+            self.config_data['cache']['enabled'] = self.cache_enabled_checkbox.isChecked()
+
+            # Save the updated config data to the file
+            if save_config(self.config_path, self.config_data):
+                self.log_status(f"Configuration saved successfully to {self.config_path}")
+            else:
+                # Log error, but don't prevent closing
+                self.log_status(f"[ERROR] Failed to save configuration to {self.config_path} on exit.")
+                # Optionally show a non-blocking message? Maybe too intrusive on close.
+
+        except Exception as e:
+            # Log any unexpected error during saving
+            self.log_status(f"[ERROR] Unexpected error saving configuration: {e}")
+            logging.exception("Error during configuration save on exit:") # Log traceback
+
+
     def closeEvent(self, event):
-        """Ensure threads are stopped on close by notifying the controller."""
+        """Save settings and ensure threads are stopped on close."""
+        self.log_status("Saving configuration before exiting...")
+        self._save_current_settings_to_config() # Save settings first
+
         if self.controller:
+            self.log_status("Shutting down background workers...")
             self.controller.shutdown_workers()
+
+        self.log_status("Exiting application.")
         event.accept()
