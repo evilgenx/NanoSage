@@ -18,6 +18,7 @@ pytesseract
 langchain-community # For SearxNG wrapper
 Pillow   # for image handling
 PyQt6    # For the GUI
+Pygments # For syntax highlighting
 
 # Optional LLM Integration
 ollama

@@ -135,18 +135,32 @@ class MainWindow(QMainWindow):
         # --- Create Menu Bar ---
         self._create_menu_bar()
 
+        # --- Initial State for Result Actions ---
+        self.update_result_actions_state(False) # Ensure actions are disabled initially
+
     # _init_ui method is now removed
 
     def _create_menu_bar(self):
         """Creates the main menu bar."""
         menu_bar = self.menuBar()
-        # File Menu (Example - if needed later)
-        # file_menu = menu_bar.addMenu("&File")
-        # exit_action = QAction("E&xit", self)
-        # exit_action.triggered.connect(self.close)
-        # file_menu.addAction(exit_action)
 
-        # Tools Menu
+        # --- File Menu ---
+        file_menu = menu_bar.addMenu("&File")
+
+        # Export Submenu
+        export_menu = file_menu.addMenu("&Export As...")
+        self.export_txt_action = QAction("Plain Text (.txt)...", self)
+        self.export_txt_action.triggered.connect(self._handle_export_txt)
+        export_menu.addAction(self.export_txt_action)
+
+        file_menu.addSeparator()
+
+        # Exit Action
+        exit_action = QAction("E&xit", self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # --- Tools Menu ---
         tools_menu = menu_bar.addMenu("&Tools")
         scrape_action = QAction("&Scrape URL...", self)
         # Connect to a controller method (to be created)
@@ -166,6 +180,7 @@ class MainWindow(QMainWindow):
         self.gemini_fetch_button.clicked.connect(self.controller.model_fetcher_manager.fetch_gemini_models)
         self.openrouter_fetch_button.clicked.connect(self.controller.model_fetcher_manager.fetch_openrouter_models)
         # Connect result buttons to result_actions functions (using lambda to pass state)
+        # Note: Enabling/disabling is now handled by update_result_actions_state
         self.open_report_button.clicked.connect(lambda: result_actions.open_report(self.current_report_path, self.log_status))
         self.open_folder_button.clicked.connect(lambda: result_actions.open_results_folder(self.current_results_dir, self.log_status))
         self.share_email_button.clicked.connect(lambda: result_actions.share_report_email(self.current_report_path, self.log_status))
@@ -183,6 +198,14 @@ class MainWindow(QMainWindow):
 
 
     # --- Slot Methods (Keep UI-specific handlers) ---
+
+    def update_result_actions_state(self, enabled):
+        """Enables or disables result-related actions (buttons and menu items)."""
+        self.open_report_button.setEnabled(enabled)
+        self.open_folder_button.setEnabled(enabled)
+        self.share_email_button.setEnabled(enabled)
+        if hasattr(self, 'export_txt_action'): # Check if action exists before enabling/disabling
+            self.export_txt_action.setEnabled(enabled)
 
     # Worker slots (on_*, fetch_*) are moved to GuiController
 
@@ -228,7 +251,14 @@ class MainWindow(QMainWindow):
         # self.openrouter_embedding_fetch_button.setEnabled(True)
 
         if device_name == "cpu" or device_name == "cuda" or device_name == "rocm": # Added rocm
-            self.embedding_model_combo.addItems(["colpali", "all-minilm"])
+            # Add the new models along with the existing ones
+            self.embedding_model_combo.addItems([
+                "colpali",
+                "all-minilm",
+                "multi-qa-mpnet",
+                "all-mpnet",
+                "multi-qa-minilm"
+            ])
             self.embedding_model_label.setText("Embedding Model:")
         # Removed elif blocks for "Gemini" and "OpenRouter" as they are no longer options
         # elif device_name == "Gemini":
@@ -354,6 +384,7 @@ class MainWindow(QMainWindow):
             if 'search' not in self.config_data: self.config_data['search'] = {}
             self.config_data['search']['provider'] = self.search_provider_combo.currentText().lower() # Save as lowercase
             self.config_data['search']['enable_iterative_search'] = self.iterative_search_checkbox.isChecked() # Save iterative search state
+            self.config_data['search']['include_visuals'] = self.include_visuals_checkbox.isChecked() # Save include visuals state
             if 'searxng' not in self.config_data['search']: self.config_data['search']['searxng'] = {}
             self.config_data['search']['searxng']['base_url'] = self.searxng_base_url_input.text()
             self.config_data['search']['searxng']['time_range'] = self.searxng_time_range_input.text() or None # Save None if empty
@@ -387,6 +418,13 @@ class MainWindow(QMainWindow):
             # Log any unexpected error during saving
             self.log_status(f"[ERROR] Unexpected error saving configuration: {e}")
             logging.exception("Error during configuration save on exit:") # Log traceback
+
+    def _handle_export_txt(self):
+        """Handles the 'Export as Text' menu action."""
+        if self.current_report_path:
+            result_actions.export_as_text(self.current_report_path, self.log_status)
+        else:
+            self.log_status("[Warning] Cannot export: No report has been generated yet.")
 
 
     def closeEvent(self, event):

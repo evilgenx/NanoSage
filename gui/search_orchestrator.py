@@ -279,7 +279,8 @@ class SearchOrchestrator(QObject):
             "searxng_categories": searxng_categories,
             "searxng_engines": searxng_engines,
             "config_path": self.config_path,
-            "output_format": llm_cfg['output_format']
+            "output_format": llm_cfg['output_format'],
+            "include_visuals": self.main_window.include_visuals_checkbox.isChecked() # Add the new checkbox state
         }
 
         # --- Start Search Worker ---

@@ -117,6 +117,8 @@ class SearchSession:
         self.toc_tree = []  # List of toc_tree.TOCNode objects for the initial subqueries
         # Store reference links found during summarization
         self._reference_links = []
+        # Store include_visuals setting
+        self.include_visuals = self.resolved_settings.get('include_visuals', False)
 
     async def run_session(self, cancellation_check_callback=None): # Added callback parameter
         """
@@ -314,7 +316,8 @@ class SearchSession:
             summarized_local=summarized_local,
             reference_links=self._reference_links, # Pass stored links
             resolved_settings=self.resolved_settings,
-            progress_callback=self.progress_callback
+            progress_callback=self.progress_callback,
+            include_visuals=self.include_visuals # Pass the stored setting
             # Pass previous_results_content, follow_up_convo if needed
         )
         self.progress_callback("Finished building final report.")

@@ -11,10 +11,11 @@ def build_final_answer(
     reference_links, # Passed in from summarize_web_results
     resolved_settings,
     progress_callback,
+    include_visuals=False, # Add new parameter
     previous_results_content="", # Keep optional args if needed
     follow_up_convo=""
 ):
-    """Builds the final RAG answer."""
+    """Builds the final RAG answer, optionally including visuals."""
     toc_str = toc_tree.build_toc_string(toc_tree_nodes) if toc_tree_nodes else "No Table of Contents generated (Web search might be disabled or yielded no relevant branches)." # Use toc_tree
     # Build a reference links string
     reference_links_str = ""
@@ -30,6 +31,20 @@ def build_final_answer(
         # This should ideally not happen due to the checks in the worker, but handle defensively
         progress_callback("[ERROR] Prompt template content missing in resolved_settings. Cannot generate final answer.")
         return "Error: Could not load prompt template for final report generation."
+
+    # --- Conditionally add visual instructions ---
+    if include_visuals:
+        progress_callback("Adding visual instructions to prompt...")
+        visual_instructions = """
+# Visual Content Guidelines (Apply ONLY if relevant and adds significant value)
+*   **Images:** Where appropriate (e.g., illustrating a concept, showing a specific item mentioned), embed relevant images using Markdown: `![Descriptive Alt Text](URL)`. Prioritize using image URLs found in the {reference_links_str} if suitable.
+*   **Maps:** If a specific geographic location (city, region, country) is a key subject, embed a static map using OpenStreetMap: `![Map of LOCATION](https://render.openstreetmap.org/cgi-bin/export?bbox=MINLON,MINLAT,MAXLON,MAXLAT&scale=10000&format=png)`. You MUST determine appropriate MINLON, MINLAT, MAXLON, MAXLAT bounding box values for the LOCATION. Replace LOCATION in the alt text. Use a reasonable scale.
+*   **Placement:** Insert visuals logically within the relevant sections of the report body. Do not clutter the report unnecessarily.
+---
+"""
+        # Prepend instructions to the main template content
+        prompt_template_content = visual_instructions + "\n" + prompt_template_content
+    # --- End conditional visual instructions ---
 
     # Format the loaded template with the gathered data
     progress_callback("Formatting final RAG prompt...")

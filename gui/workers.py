@@ -49,6 +49,7 @@ class SearchWorker(QThread):
     def __init__(self, params, parent=None):
         super().__init__(parent)
         self.params = params
+        self.include_visuals = params.get("include_visuals", False) # Store the new parameter
         self._progress_callback_proxy = None # To hold the proxy object
         self._mutex = QMutex()
         self._cancellation_requested = False
@@ -177,6 +178,7 @@ class SearchWorker(QThread):
                 'searxng_time_range': self.params.get("searxng_time_range"),
                 'searxng_categories': self.params.get("searxng_categories"),
                 'searxng_engines': self.params.get("searxng_engines"),
+                'include_visuals': self.include_visuals, # Pass the stored value
             }
 
             # --- Instantiate SearchSession correctly ---

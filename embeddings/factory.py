@@ -20,6 +20,20 @@ EMBEDDER_REGISTRY = {
     #     "class": SentenceTransformerEmbedder,
     #     "default_model_name": "multi-qa-MiniLM-L6-cos-v1"
     # },
+    # --- Added Models ---
+    "multi-qa-mpnet": {
+        "class": SentenceTransformerEmbedder,
+        "default_model_name": "multi-qa-mpnet-base-dot-v1"
+    },
+    "all-mpnet": {
+         "class": SentenceTransformerEmbedder,
+         "default_model_name": "all-mpnet-base-v2"
+    },
+     "multi-qa-minilm": {
+         "class": SentenceTransformerEmbedder,
+         "default_model_name": "multi-qa-MiniLM-L6-cos-v1"
+     }
+    # --- End Added Models ---
 }
 
 def create_embedder(embedding_model_name: str, device: str, cache_manager: Optional[CacheManager] = None) -> BaseEmbedder: # Added cache_manager

@@ -4,9 +4,12 @@
 import logging
 import os
 import re
-from PyQt6.QtCore import QObject, pyqtSignal, Qt, QModelIndex
-from PyQt6.QtWidgets import QMenu, QInputDialog, QMessageBox
-from PyQt6.QtGui import QStandardItemModel, QStandardItem
+from PyQt6.QtCore import QObject, pyqtSignal, Qt, QModelIndex, QSortFilterProxyModel # Added QSortFilterProxyModel
+from PyQt6.QtWidgets import QMenu, QInputDialog, QMessageBox, QApplication, QLineEdit, QPushButton # Added QLineEdit, QPushButton
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QTextDocument, QIcon # Added QTextDocument, QIcon
+
+# Import the new highlighter
+from .syntax_highlighter import MarkdownSyntaxHighlighter
 
 class ResultDisplayManager(QObject):
     """
@@ -23,6 +26,21 @@ class ResultDisplayManager(QObject):
         self.main_window = main_window
         self.current_report_html = "" # Store the latest full HTML for refinement
 
+        # --- Model Setup ---
+        self.toc_source_model = QStandardItemModel()
+        self.toc_proxy_model = QSortFilterProxyModel()
+        self.toc_proxy_model.setSourceModel(self.toc_source_model)
+        self.toc_proxy_model.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.toc_proxy_model.setFilterKeyColumn(0) # Filter based on the text in the first column
+        self.toc_proxy_model.setRecursiveFilteringEnabled(True) # Filter recursively
+        self.main_window.toc_tree_widget.setModel(self.toc_proxy_model) # Set proxy model on the view
+
+        # Instantiate the syntax highlighter
+        self.highlighter = MarkdownSyntaxHighlighter(self.main_window.results_text_edit.document())
+
+        # Connect filter input signal
+        self.main_window.toc_filter_input.textChanged.connect(self._handle_toc_filter_changed)
+
     def log_status(self, message):
         """Emit status update signal."""
         self.status_update.emit(message)
@@ -37,9 +55,8 @@ class ResultDisplayManager(QObject):
         self.main_window.current_report_path = report_path
         self.main_window.current_results_dir = os.path.dirname(report_path)
         self.main_window.report_path_label.setText(report_path)
-        self.main_window.open_report_button.setEnabled(True)
-        self.main_window.open_folder_button.setEnabled(True)
-        self.main_window.share_email_button.setEnabled(True)
+        # Use the centralized state update method
+        self.main_window.update_result_actions_state(True)
 
         # Store the HTML content
         self.current_report_html = final_answer_content
@@ -67,33 +84,82 @@ class ResultDisplayManager(QObject):
 
         self.log_status("Results displayed.")
 
+        # 5. Connect Search Controls (disconnect first to avoid duplicates)
+        try:
+            self.main_window.results_search_input.returnPressed.disconnect(self._handle_find_next)
+            self.main_window.results_find_next_button.clicked.disconnect(self._handle_find_next)
+            self.main_window.results_find_prev_button.clicked.disconnect(self._handle_find_previous)
+        except TypeError:
+            pass # Signals not connected yet
+        self.main_window.results_search_input.returnPressed.connect(self._handle_find_next)
+        self.main_window.results_find_next_button.clicked.connect(self._handle_find_next)
+        self.main_window.results_find_prev_button.clicked.connect(self._handle_find_previous)
+
+        # 6. Connect TOC Expand/Collapse Controls (disconnect first)
+        try:
+            self.main_window.toc_expand_all_button.clicked.disconnect(self._handle_toc_expand_all)
+            self.main_window.toc_collapse_all_button.clicked.disconnect(self._handle_toc_collapse_all)
+        except TypeError:
+            pass # Signals not connected yet
+        self.main_window.toc_expand_all_button.clicked.connect(self._handle_toc_expand_all)
+        self.main_window.toc_collapse_all_button.clicked.connect(self._handle_toc_collapse_all)
+
+
     def _populate_toc_tree(self, toc_nodes):
-        """Recursively populates the QTreeView model from TOCNode data."""
-        model = self.main_window.toc_tree_widget.model()
-        if not isinstance(model, QStandardItemModel):
-            model = QStandardItemModel()
-            self.main_window.toc_tree_widget.setModel(model)
-        model.clear()
+        """Recursively populates the QTreeView's source model from TOCNode data."""
+        # Clear the source model directly
+        self.toc_source_model.clear()
+
+        # Define custom data roles (constants for clarity)
+        AnchorIdRole = Qt.ItemDataRole.UserRole
+        NodeDataRole = Qt.ItemDataRole.UserRole + 1
 
         def add_items(parent_item, nodes):
             for node in nodes:
                 item = QStandardItem(node.query_text)
-                item.setData(node.anchor_id, Qt.ItemDataRole.UserRole)
+                # Store anchor ID
+                item.setData(node.anchor_id, AnchorIdRole)
+                # Store the whole node object for context menu actions
+                item.setData(node, NodeDataRole)
                 item.setEditable(False)
+
+                # Set Icon based on depth
+                style = QApplication.style()
+                if node.depth == 1:
+                    icon = style.standardIcon(style.StandardPixmap.SP_FileIcon) # Icon for top-level
+                else:
+                    icon = style.standardIcon(style.StandardPixmap.SP_ArrowRight) # Icon for children
+                item.setIcon(icon)
+
+                # Set tooltip with summary snippet
+                if node.summary:
+                    tooltip_text = node.summary[:150] + ("..." if len(node.summary) > 150 else "")
+                    item.setToolTip(tooltip_text)
+                else:
+                    item.setToolTip("No summary available.")
+
                 parent_item.appendRow(item)
                 if node.children:
                     add_items(item, node.children)
 
-        add_items(model.invisibleRootItem(), toc_nodes)
-        # self.main_window.toc_tree_widget.expandToDepth(0) # Optional: Expand top level
+        add_items(self.toc_source_model.invisibleRootItem(), toc_nodes)
+        # self.main_window.toc_tree_widget.expandToDepth(0) # Optional: Expand top level after populating
 
     def _handle_toc_click(self, index: QModelIndex):
         """Scrolls the results view to the anchor associated with the clicked TOC item."""
         if not index.isValid():
             return
-        item = self.main_window.toc_tree_widget.model().itemFromIndex(index)
+
+        # Map proxy index to source index
+        source_index = self.toc_proxy_model.mapToSource(index)
+        if not source_index.isValid():
+            return
+
+        item = self.toc_source_model.itemFromIndex(source_index)
         if item:
-            anchor_id = item.data(Qt.ItemDataRole.UserRole)
+            # Define custom data roles (constants for clarity) - must match _populate_toc_tree
+            AnchorIdRole = Qt.ItemDataRole.UserRole
+            anchor_id = item.data(AnchorIdRole)
             if anchor_id:
                 self.log_status(f"Navigating to anchor: {anchor_id}")
                 self.main_window.results_text_edit.scrollToAnchor(anchor_id)
@@ -106,18 +172,121 @@ class ResultDisplayManager(QObject):
         if not index.isValid():
             return
 
-        item = self.main_window.toc_tree_widget.model().itemFromIndex(index)
-        anchor_id = item.data(Qt.ItemDataRole.UserRole) if item else None
-
-        if not anchor_id:
+        # Map proxy index to source index
+        source_index = self.toc_proxy_model.mapToSource(index)
+        if not source_index.isValid():
             return
 
+        # Define custom data roles (constants for clarity) - must match _populate_toc_tree
+        AnchorIdRole = Qt.ItemDataRole.UserRole
+        NodeDataRole = Qt.ItemDataRole.UserRole + 1
+
+        item = self.toc_source_model.itemFromIndex(source_index)
+        if not item:
+            return
+
+        # Retrieve data using roles from the source item
+        anchor_id = item.data(AnchorIdRole)
+        toc_node = item.data(NodeDataRole) # Get the stored TOCNode object
+
+        if not toc_node: # Check if we have the node data
+             self.log_status(f"[Warning] Could not retrieve TOCNode data for item: {item.text()}")
+             return
+
         menu = QMenu()
+
+        # Refine Action (existing)
         refine_action = menu.addAction("Refine Section...")
+        refine_action.setEnabled(bool(anchor_id)) # Only enable if anchor exists
+
+        menu.addSeparator()
+
+        # Copy Actions
+        copy_query_action = menu.addAction("Copy Query Text")
+        copy_summary_action = menu.addAction("Copy Section Summary")
+        copy_summary_action.setEnabled(bool(toc_node.summary)) # Enable only if summary exists
+
+        # Execute Menu
         action = menu.exec(self.main_window.toc_tree_widget.viewport().mapToGlobal(position))
 
-        if action == refine_action:
+        # Handle Actions
+        if action == refine_action and anchor_id:
             self._handle_refine_request(anchor_id)
+        elif action == copy_query_action:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(toc_node.query_text)
+            self.log_status(f"Copied query text: '{toc_node.query_text}'")
+        elif action == copy_summary_action:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(toc_node.summary)
+            self.log_status(f"Copied summary for query: '{toc_node.query_text}'")
+
+    # --- TOC Filter Handler ---
+
+    def _handle_toc_filter_changed(self, text):
+        """Applies the filter text to the ToC proxy model."""
+        self.toc_proxy_model.setFilterRegularExpression(text)
+        # Optional: Automatically expand items when filtering?
+        # if text:
+        #     self.main_window.toc_tree_widget.expandAll()
+        # else:
+        #     self.main_window.toc_tree_widget.collapseAll() # Or restore previous state
+
+    # --- TOC Expand/Collapse Handlers ---
+
+    def _handle_toc_expand_all(self):
+        """Expands all items in the TOC tree."""
+        self.log_status("Expanding all TOC items.")
+        self.main_window.toc_tree_widget.expandAll()
+
+    def _handle_toc_collapse_all(self):
+        """Collapses all items in the TOC tree."""
+        self.log_status("Collapsing all TOC items.")
+        self.main_window.toc_tree_widget.collapseAll()
+
+    # --- Search Within Results Handlers ---
+
+    def _handle_find_next(self):
+        """Finds the next occurrence of the text in the results_search_input."""
+        search_text = self.main_window.results_search_input.text()
+        if not search_text:
+            self.log_status("Find Next: No search text entered.")
+            return
+
+        found = self.main_window.results_text_edit.find(search_text)
+        if not found:
+            self.log_status(f"Find Next: Text '{search_text}' not found (reached end).")
+            # Optional: Move cursor to the beginning to wrap search
+            cursor = self.main_window.results_text_edit.textCursor()
+            cursor.movePosition(cursor.MoveOperation.Start)
+            self.main_window.results_text_edit.setTextCursor(cursor)
+            # Try finding again from the start
+            found_again = self.main_window.results_text_edit.find(search_text)
+            if not found_again:
+                 self.log_status(f"Find Next: Text '{search_text}' not found anywhere.")
+
+
+    def _handle_find_previous(self):
+        """Finds the previous occurrence of the text in the results_search_input."""
+        search_text = self.main_window.results_search_input.text()
+        if not search_text:
+            self.log_status("Find Previous: No search text entered.")
+            return
+
+        found = self.main_window.results_text_edit.find(search_text, QTextDocument.FindFlag.FindBackward)
+        if not found:
+            self.log_status(f"Find Previous: Text '{search_text}' not found (reached beginning).")
+            # Optional: Move cursor to the end to wrap search
+            cursor = self.main_window.results_text_edit.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self.main_window.results_text_edit.setTextCursor(cursor)
+             # Try finding again from the end (backwards)
+            found_again = self.main_window.results_text_edit.find(search_text, QTextDocument.FindFlag.FindBackward)
+            if not found_again:
+                 self.log_status(f"Find Previous: Text '{search_text}' not found anywhere.")
+
+    # --- End Search Within Results Handlers ---
+
 
     def _handle_refine_request(self, anchor_id):
         """Handles the 'Refine Section' action by emitting a signal."""
@@ -180,14 +349,13 @@ class ResultDisplayManager(QObject):
         """Clears the results text edit and TOC."""
         self.log_status("Clearing results display.")
         self.main_window.results_text_edit.clear()
-        model = self.main_window.toc_tree_widget.model()
-        if isinstance(model, QStandardItemModel):
-            model.clear()
+        # Clear the source model, proxy model updates automatically
+        self.toc_source_model.clear()
+        self.main_window.toc_filter_input.clear() # Clear filter input as well
         self.current_report_html = "" # Clear stored HTML
         # Reset report path labels etc. in MainWindow
         self.main_window.report_path_label.setText("No report generated yet.")
         self.main_window.current_report_path = None
         self.main_window.current_results_dir = None
-        self.main_window.open_report_button.setEnabled(False)
-        self.main_window.open_folder_button.setEnabled(False)
-        self.main_window.share_email_button.setEnabled(False)
+        # Use the centralized state update method
+        self.main_window.update_result_actions_state(False)

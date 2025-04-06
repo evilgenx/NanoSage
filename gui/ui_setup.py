@@ -135,6 +135,11 @@ def setup_main_window_ui(main_window):
     main_window.iterative_search_checkbox = QCheckBox("Enable Iterative Search (Experimental)")
     left_column_layout.addRow(main_window.iterative_search_checkbox) # Add checkbox directly
 
+    # Include Images/Maps Checkbox
+    main_window.include_visuals_checkbox = QCheckBox("Include Images/Maps in Report")
+    main_window.include_visuals_checkbox.setToolTip("Check this to instruct the LLM to include relevant images and static maps (using OpenStreetMap) in the final report.")
+    left_column_layout.addRow(main_window.include_visuals_checkbox) # Add the new checkbox
+
     # SearXNG Specific Settings (visibility handled in MainWindow)
     main_window.searxng_base_url_label = QLabel("SearXNG URL:")
     main_window.searxng_base_url_input = QLineEdit()
@@ -228,76 +233,78 @@ def setup_main_window_ui(main_window):
 
     config_tabs.addTab(rag_tab, "RAG")
 
-    # Add the tab widget to the main left layout
-    left_layout.addWidget(config_tabs)
+    # -- Results Tab --
+    results_tab_widget = QWidget()
+    results_tab_layout = QVBoxLayout(results_tab_widget) # Main layout for the results tab
+    results_tab_layout.setContentsMargins(10, 10, 10, 10)
+    results_tab_layout.setSpacing(8)
 
-    # Execution Button (remains below the tabs)
-    main_window.run_button = QPushButton("Run Search")
-    main_window.run_button.setObjectName("run_button") # Set object name
-    # Remove inline style - will be handled by QSS
-    # main_window.run_button.setStyleSheet("...")
-    left_layout.addWidget(main_window.run_button)
+    # --- Add Search Controls (Moved from Right Panel) ---
+    search_controls_layout = QHBoxLayout()
+    search_controls_layout.setSpacing(5)
+    main_window.results_search_input = QLineEdit()
+    main_window.results_search_input.setPlaceholderText("Search in results...")
+    main_window.results_find_prev_button = QPushButton("Previous")
+    main_window.results_find_next_button = QPushButton("Next")
+    # Add Icons for Find buttons
+    prev_icon = QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_ArrowUp)
+    next_icon = QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_ArrowDown)
+    main_window.results_find_prev_button.setIcon(prev_icon)
+    main_window.results_find_next_button.setIcon(next_icon)
+    main_window.results_find_prev_button.setToolTip("Find previous occurrence")
+    main_window.results_find_next_button.setToolTip("Find next occurrence")
 
-    # Add Progress Bar
-    main_window.progress_bar = QProgressBar()
-    main_window.progress_bar.setVisible(False) # Initially hidden
-    main_window.progress_bar.setRange(0, 100) # Default range, will be set to 0,0 for indeterminate
-    main_window.progress_bar.setTextVisible(False) # Hide percentage text
-    left_layout.addWidget(main_window.progress_bar)
+    search_controls_layout.addWidget(QLabel("Find:")) # Simple label
+    search_controls_layout.addWidget(main_window.results_search_input, 1) # Input stretches
+    search_controls_layout.addWidget(main_window.results_find_prev_button)
+    search_controls_layout.addWidget(main_window.results_find_next_button)
+    results_tab_layout.addLayout(search_controls_layout) # Add to results tab layout
+    # --- End Search Controls ---
 
-    # Add Cancel Button
-    main_window.cancel_button = QPushButton("Cancel Search")
-    main_window.cancel_button.setObjectName("cancel_button") # Set object name
-    # Remove inline style - will be handled by QSS
-    # main_window.cancel_button.setStyleSheet("...")
-    main_window.cancel_button.setVisible(False) # Initially hidden
-    main_window.cancel_button.setEnabled(False) # Initially disabled
-    left_layout.addWidget(main_window.cancel_button)
-
-    left_layout.addStretch() # Push elements to the top
-
-    # --- Wrap Left Panel in Scroll Area ---
-    left_scroll_area = QScrollArea()
-    left_scroll_area.setWidget(left_panel)
-    left_scroll_area.setWidgetResizable(True)
-    left_scroll_area.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding) # Apply size policy to scroll area
-
-    # --- Right Panel: Status & Results ---
-    right_panel = QWidget()
-    right_layout = QVBoxLayout(right_panel)
-    right_layout.setContentsMargins(0, 0, 0, 0) # Let group boxes handle inner margins
-    right_layout.setSpacing(10) # Space between status and results groups
-    right_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-
-    # Status Log
-    status_group = QGroupBox("Status Log")
-    status_layout = QVBoxLayout()
-    status_layout.setContentsMargins(10, 10, 10, 10) # Margins inside status group
-    main_window.status_log = QTextEdit()
-    main_window.status_log.setReadOnly(True)
-    main_window.status_log.setPlaceholderText("Search progress will appear here...")
-    status_layout.addWidget(main_window.status_log)
-    status_group.setLayout(status_layout)
-    right_layout.addWidget(status_group)
-
-
-    # Results Area (TOC and Content)
-    results_group = QGroupBox("Results")
-    results_main_layout = QVBoxLayout() # Use QVBoxLayout for the group box
-    results_main_layout.setContentsMargins(10, 10, 10, 10)
-    results_main_layout.setSpacing(8)
-
-    # Splitter for TOC and Results Text
+    # --- Splitter for TOC and Results Text (Moved from Right Panel) ---
     main_window.results_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+    # --- Left side of Splitter (TOC + Controls) ---
+    toc_container_widget = QWidget()
+    toc_container_layout = QVBoxLayout(toc_container_widget)
+    toc_container_layout.setContentsMargins(0, 0, 0, 0) # No margins for the container layout
+    toc_container_layout.setSpacing(5) # Space between filter, buttons, and tree
+
+    # TOC Filter Input
+    main_window.toc_filter_input = QLineEdit()
+    main_window.toc_filter_input.setPlaceholderText("Filter ToC...")
+    main_window.toc_filter_input.setClearButtonEnabled(True) # Add a clear button
+    toc_container_layout.addWidget(main_window.toc_filter_input) # Add filter input first
+
+    # TOC Control Buttons
+    toc_buttons_layout = QHBoxLayout()
+    toc_buttons_layout.setSpacing(5)
+    main_window.toc_expand_all_button = QPushButton("Expand All")
+    main_window.toc_collapse_all_button = QPushButton("Collapse All")
+    # Add Icons (using standard icons if available, might need custom ones)
+    expand_icon = QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_ArrowDown) # Placeholder icon
+    collapse_icon = QApplication.style().standardIcon(QApplication.style().StandardPixmap.SP_ArrowUp) # Placeholder icon
+    main_window.toc_expand_all_button.setIcon(expand_icon)
+    main_window.toc_collapse_all_button.setIcon(collapse_icon)
+    main_window.toc_expand_all_button.setToolTip("Expand all items in the Table of Contents")
+    main_window.toc_collapse_all_button.setToolTip("Collapse all items in the Table of Contents")
+    toc_buttons_layout.addWidget(main_window.toc_expand_all_button)
+    toc_buttons_layout.addWidget(main_window.toc_collapse_all_button)
+    toc_buttons_layout.addStretch() # Push buttons left
+
+    toc_container_layout.addLayout(toc_buttons_layout) # Add button layout to container
 
     # TOC Tree Widget
     main_window.toc_tree_widget = QTreeView()
     main_window.toc_tree_widget.setHeaderHidden(True) # Hide the default header
     main_window.toc_tree_widget.setModel(QStandardItemModel()) # Set an empty model initially
     main_window.toc_tree_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-    main_window.results_splitter.addWidget(main_window.toc_tree_widget)
+    toc_container_layout.addWidget(main_window.toc_tree_widget) # Add tree below buttons
 
+    main_window.results_splitter.addWidget(toc_container_widget) # Add container to splitter
+    # --- End Left side of Splitter ---
+
+    # --- Right side of Splitter (Results Text) ---
     # Results Text Edit
     main_window.results_text_edit = QTextEdit()
     main_window.results_text_edit.setReadOnly(True)
@@ -308,9 +315,10 @@ def setup_main_window_ui(main_window):
     # Set initial splitter sizes (e.g., 1/4 for TOC, 3/4 for results)
     main_window.results_splitter.setSizes([150, 450]) # Adjust initial sizes as needed
 
-    results_main_layout.addWidget(main_window.results_splitter) # Add splitter to the group layout
+    results_tab_layout.addWidget(main_window.results_splitter) # Add splitter to results tab layout
+    # --- End Splitter ---
 
-    # Report Path and Action Buttons (below the splitter)
+    # --- Report Path and Action Buttons (Moved from Right Panel) ---
     report_actions_layout = QFormLayout() # Use FormLayout for path label + buttons row
     report_actions_layout.setContentsMargins(0, 5, 0, 0) # Add some top margin
     report_actions_layout.setVerticalSpacing(8)
@@ -345,20 +353,71 @@ def setup_main_window_ui(main_window):
     button_layout.addWidget(main_window.share_email_button) # Added email button to layout
     report_actions_layout.addRow(button_layout) # Add button row to the form layout
 
-    results_main_layout.addLayout(report_actions_layout) # Add the actions layout below the splitter
+    results_tab_layout.addLayout(report_actions_layout) # Add the actions layout to results tab layout
+    # --- End Report Path and Action Buttons ---
 
-    results_group.setLayout(results_main_layout) # Set the main layout for the group box
-    right_layout.addWidget(results_group) # Add the group box to the right panel
+    config_tabs.addTab(results_tab_widget, "Results") # Add the new Results tab
 
-    # --- Wrap Right Panel in Scroll Area --- # Keep this wrapping the whole right side
-    right_scroll_area = QScrollArea()
-    right_scroll_area.setWidget(right_panel)
-    right_scroll_area.setWidgetResizable(True)
-    right_scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding) # Apply size policy to scroll area
+    # Add the tab widget to the main left layout
+    left_layout.addWidget(config_tabs)
 
-    # Add panels (wrapped in scroll areas) to main layout
-    main_layout.addWidget(left_scroll_area, 2) # Add scroll area instead of panel (Increased stretch)
-    main_layout.addWidget(right_scroll_area, 1) # Add scroll area instead of panel (Decreased stretch)
+    # Execution Button (remains below the tabs)
+    main_window.run_button = QPushButton("Run Search")
+    main_window.run_button.setObjectName("run_button") # Set object name
+    # Remove inline style - will be handled by QSS
+    # main_window.run_button.setStyleSheet("...")
+    left_layout.addWidget(main_window.run_button)
+
+    # Add Progress Bar
+    main_window.progress_bar = QProgressBar()
+    main_window.progress_bar.setVisible(False) # Initially hidden
+    main_window.progress_bar.setRange(0, 100) # Default range, will be set to 0,0 for indeterminate
+    main_window.progress_bar.setTextVisible(False) # Hide percentage text
+    left_layout.addWidget(main_window.progress_bar)
+
+    # Add Cancel Button
+    main_window.cancel_button = QPushButton("Cancel Search")
+    main_window.cancel_button.setObjectName("cancel_button") # Set object name
+    # Remove inline style - will be handled by QSS
+    # main_window.cancel_button.setStyleSheet("...")
+    main_window.cancel_button.setVisible(False) # Initially hidden
+    main_window.cancel_button.setEnabled(False) # Initially disabled
+    left_layout.addWidget(main_window.cancel_button)
+
+    left_layout.addStretch() # Push elements to the top
+
+    # --- Wrap Left Panel in Scroll Area ---
+    left_scroll_area = QScrollArea()
+    left_scroll_area.setWidget(left_panel)
+    left_scroll_area.setWidgetResizable(True)
+    left_scroll_area.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding) # Apply size policy to scroll area
+
+    # --- Right Panel: Status Log Only ---
+    right_panel = QWidget()
+    right_layout = QVBoxLayout(right_panel)
+    right_layout.setContentsMargins(0, 0, 0, 0) # Let group boxes handle inner margins
+    right_layout.setSpacing(10) # Space between status and results groups (now just status)
+    right_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    # Status Log
+    status_group = QGroupBox("Status Log")
+    status_layout = QVBoxLayout()
+    status_layout.setContentsMargins(10, 10, 10, 10) # Margins inside status group
+    main_window.status_log = QTextEdit()
+    main_window.status_log.setReadOnly(True)
+    main_window.status_log.setPlaceholderText("Search progress will appear here...")
+    status_layout.addWidget(main_window.status_log)
+    status_group.setLayout(status_layout)
+    right_layout.addWidget(status_group) # Status log remains on the right
+    right_layout.addStretch() # Add stretch to push status log up if needed
+
+    # Results Area (TOC and Content) - MOVED TO RESULTS TAB on Left Panel
+
+    # --- Right Panel Scroll Area Removed ---
+
+    # Add panels directly to main layout with adjusted stretch
+    main_layout.addWidget(left_scroll_area, 3) # Give left panel more stretch (3)
+    main_layout.addWidget(right_panel, 1)      # Add right panel directly (stretch 1)
 
     # --- Initial UI State (handled in MainWindow after setup) ---
     # e.g., setting initial combo box values based on config, hiding/showing elements

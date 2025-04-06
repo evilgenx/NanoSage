@@ -7,7 +7,7 @@ import subprocess
 import webbrowser
 import urllib.parse
 import logging
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QMessageBox, QFileDialog # Added QFileDialog
 
 def open_report(report_path, log_status_func):
     """Open the generated report file using the default system viewer."""
@@ -70,3 +70,49 @@ def share_report_email(report_path, log_status_func):
             QMessageBox.warning(None, "Email Error", f"Could not open the email client:\n{e}")
     else:
         QMessageBox.warning(None, "File Not Found", "The report file does not exist or path is not set. Cannot share.")
+
+
+def export_as_text(report_path, log_status_func):
+    """Exports the report content as a plain text file."""
+    if not report_path or not os.path.exists(report_path):
+        log_status_func("[Warning] Cannot export: Report path is invalid or file does not exist.")
+        QMessageBox.warning(None, "Export Error", "Cannot export: Report file not found.")
+        return
+
+    # Suggest a default filename
+    base_name = os.path.basename(report_path)
+    name_without_ext, _ = os.path.splitext(base_name)
+    default_save_path = os.path.join(os.path.dirname(report_path), f"{name_without_ext}.txt")
+
+    # Open 'Save File' dialog
+    save_path, _ = QFileDialog.getSaveFileName(
+        None, # Parent window (None is acceptable)
+        "Export Report as Text", # Dialog title
+        default_save_path, # Default path/filename
+        "Text Files (*.txt);;All Files (*)" # File filters
+    )
+
+    if not save_path:
+        log_status_func("Export cancelled by user.")
+        return
+
+    # Ensure the filename ends with .txt if the user didn't add it
+    if not save_path.lower().endswith(".txt"):
+        save_path += ".txt"
+
+    try:
+        # Read the original Markdown report content
+        with open(report_path, 'r', encoding='utf-8') as infile:
+            content = infile.read()
+
+        # Write the content to the new text file
+        with open(save_path, 'w', encoding='utf-8') as outfile:
+            outfile.write(content)
+
+        log_status_func(f"Report successfully exported as text to: {save_path}")
+        QMessageBox.information(None, "Export Successful", f"Report exported successfully to:\n{save_path}")
+
+    except Exception as e:
+        error_msg = f"Error exporting report as text: {e}"
+        log_status_func(f"[Error] {error_msg}")
+        QMessageBox.critical(None, "Export Failed", f"Could not export the report:\n{e}")
