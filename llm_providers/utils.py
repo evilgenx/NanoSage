@@ -1,5 +1,8 @@
 # llm_providers/utils.py
 import re
+import logging # <<< Import logging
+
+logger = logging.getLogger(__name__) # <<< Get logger
 
 def extract_final_query(text):
     """Extracts the query following the 'Final Enhanced Query:' marker."""
@@ -52,7 +55,7 @@ def split_query(query, max_len=200):
                 # Or, we could truncate it, but that might lose meaning.
                 # Let's add it as is for now.
                 # Consider adding a warning if a single sentence exceeds max_len.
-                print(f"[WARN] Single sentence exceeds max_len ({max_len}): '{sentence[:50]}...'")
+                logger.warning(f"Single sentence exceeds max_len ({max_len}): '{sentence[:50]}...'") # <<< Use logger
                 subqueries.append(sentence)
                 current = "" # Reset current as this long sentence forms its own chunk
 

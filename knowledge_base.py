@@ -13,7 +13,7 @@ from embeddings.base import BaseEmbedder
 import document_parsers.factory as parser_factory
 from typing import List, Dict, Any, Optional
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) # <<< Get logger for this module
 
 ##################
 # Scoring (Keep this utility function here or move to a general utils module)
@@ -70,6 +70,7 @@ class KnowledgeBase:
         self.collection_name = collection_name
 
         self._progress(f"Initializing ChromaDB client at path: {self.db_path}")
+        logger.info(f"Initializing ChromaDB client at path: {self.db_path}") # <<< Added logger
         try:
             # Initialize ChromaDB client for persistent storage
             self.client = chromadb.PersistentClient(path=self.db_path)
@@ -82,12 +83,15 @@ class KnowledgeBase:
                 # metadata={"hnsw:space": "cosine"} # Example: Specify distance metric if needed
             )
             self._progress(f"Connected to ChromaDB collection: '{self.collection_name}'")
+            logger.info(f"Connected to ChromaDB collection: '{self.collection_name}'") # <<< Added logger
         except Exception as e:
-            self._progress(f"[ERROR] Failed to initialize ChromaDB: {e}")
-            logger.error("ChromaDB Initialization Failed", exc_info=True)
+            err_msg = f"Failed to initialize ChromaDB: {e}"
+            self._progress(f"[ERROR] {err_msg}")
+            logger.error(err_msg, exc_info=True) # <<< Use logger
             raise # Re-raise the exception
 
-        self._progress(f"KnowledgeBase initialized with embedder: {type(embedder).__name__} and ChromaDB collection: '{self.collection_name}'")
+        logger.info(f"KnowledgeBase initialized with embedder: {type(embedder).__name__} and ChromaDB collection: '{self.collection_name}'") # <<< Use logger
+        self._progress(f"KnowledgeBase initialized with embedder: {type(embedder).__name__}") # Keep simpler progress message
 
     def build_from_directory(self, corpus_dir: str):
         """
@@ -96,9 +100,12 @@ class KnowledgeBase:
         """
         if not corpus_dir or not os.path.isdir(corpus_dir):
             if corpus_dir: # Only warn if a dir was actually provided
-                self._progress(f"[WARN] Corpus directory not found or invalid: {corpus_dir}. Skipping build.")
+                warn_msg = f"Corpus directory not found or invalid: {corpus_dir}. Skipping build."
+                self._progress(f"[WARN] {warn_msg}")
+                logger.warning(warn_msg) # <<< Use logger
             return
 
+        logger.info(f"Building knowledge base from directory: {corpus_dir}") # <<< Use logger
         self._progress(f"Building knowledge base from directory: {corpus_dir}")
         all_files = [
             os.path.join(corpus_dir, f) for f in os.listdir(corpus_dir)
@@ -106,6 +113,7 @@ class KnowledgeBase:
         ]
         total_files = len(all_files)
         self._progress(f"Found {total_files} files in {corpus_dir}. Starting processing...")
+        logger.info(f"Found {total_files} files in {corpus_dir}. Starting processing...") # <<< Use logger
 
         # Process files in batches for potentially better performance with ChromaDB add/upsert
         batch_size = 50 # Configurable?
@@ -118,26 +126,34 @@ class KnowledgeBase:
         for i, file_path in enumerate(all_files):
             filename = os.path.basename(file_path)
             self._progress(f"Processing file {i+1}/{total_files}: {filename}")
+            logger.debug(f"Processing file {i+1}/{total_files}: {filename}") # <<< Use logger (debug level)
 
             parser = parser_factory.get_parser(file_path)
             if not parser:
+                logger.warning(f"No suitable parser found for file: {filename}. Skipping.") # <<< Use logger
                 continue # Skip unsupported file types
 
             try:
                 text = parser.parse(file_path)
             except Exception as e:
-                self._progress(f"[WARN] Failed to parse {filename}: {e}. Skipping.")
+                warn_msg = f"Failed to parse {filename}: {e}. Skipping."
+                self._progress(f"[WARN] {warn_msg}")
+                logger.warning(warn_msg, exc_info=True) # <<< Use logger with traceback
                 continue
 
             if not text or not text.strip():
-                self._progress(f"[INFO] Skipping empty or unreadable file: {filename}")
+                info_msg = f"Skipping empty or unreadable file: {filename}"
+                self._progress(f"[INFO] {info_msg}")
+                logger.info(info_msg) # <<< Use logger
                 continue
 
             # --- Embedding Step ---
             emb = self.embedder.embed(text)
 
             if emb is None:
-                self._progress(f"[WARN] Failed to generate embedding for {filename}. Skipping.")
+                warn_msg = f"Failed to generate embedding for {filename}. Skipping."
+                self._progress(f"[WARN] {warn_msg}")
+                logger.warning(warn_msg) # <<< Use logger
                 continue # Skip if embedding failed
 
             # --- Prepare data for ChromaDB ---
@@ -165,11 +181,14 @@ class KnowledgeBase:
                         documents=documents_batch
                     )
                     processed_count += len(ids_batch)
-                    self._progress(f"Upserted batch of {len(ids_batch)} documents to ChromaDB.")
+                    upsert_msg = f"Upserted batch of {len(ids_batch)} documents to ChromaDB."
+                    self._progress(upsert_msg)
+                    logger.info(upsert_msg) # <<< Use logger
                     ids_batch, embeddings_batch, metadatas_batch, documents_batch = [], [], [], [] # Reset batch
                 except Exception as e:
-                    self._progress(f"[ERROR] Failed to upsert batch to ChromaDB: {e}")
-                    logger.error("ChromaDB upsert failed for batch", exc_info=True)
+                    err_msg = f"Failed to upsert batch to ChromaDB: {e}"
+                    self._progress(f"[ERROR] {err_msg}")
+                    logger.error(err_msg, exc_info=True) # <<< Use logger
                     # Decide whether to skip the batch or halt the process
                     ids_batch, embeddings_batch, metadatas_batch, documents_batch = [], [], [], [] # Reset batch anyway
 
@@ -183,12 +202,16 @@ class KnowledgeBase:
                     documents=documents_batch
                 )
                 processed_count += len(ids_batch)
-                self._progress(f"Upserted final batch of {len(ids_batch)} documents to ChromaDB.")
+                upsert_msg = f"Upserted final batch of {len(ids_batch)} documents to ChromaDB."
+                self._progress(upsert_msg)
+                logger.info(upsert_msg) # <<< Use logger
             except Exception as e:
-                self._progress(f"[ERROR] Failed to upsert final batch to ChromaDB: {e}")
-                logger.error("ChromaDB upsert failed for final batch", exc_info=True)
+                err_msg = f"Failed to upsert final batch to ChromaDB: {e}"
+                self._progress(f"[ERROR] {err_msg}")
+                logger.error(err_msg, exc_info=True) # <<< Use logger
 
-        self._progress(f"Knowledge base build complete. Processed {processed_count} documents from {corpus_dir}.")
+        logger.info(f"Knowledge base build complete. Processed {processed_count} documents from {corpus_dir}.") # <<< Use logger
+        self._progress(f"Knowledge base build complete. Processed {processed_count} documents.")
 
     def add_documents(self, entries: List[Dict[str, Any]]):
         """
@@ -211,12 +234,12 @@ class KnowledgeBase:
             # Determine identifier for ID generation
             identifier = metadata.get('file_path') or metadata.get('source_url') or metadata.get('source')
             if not identifier:
-                logger.warning("Skipping entry due to missing identifier (file_path/source_url/source) in metadata.")
+                logger.warning("Skipping entry due to missing identifier (file_path/source_url/source) in metadata.") # <<< Use logger
                 count_skipped += 1
                 continue
 
             if embedding is None:
-                logger.warning(f"Skipping entry for '{identifier}' due to missing embedding.")
+                logger.warning(f"Skipping entry for '{identifier}' due to missing embedding.") # <<< Use logger
                 count_skipped += 1
                 continue
 
@@ -228,7 +251,7 @@ class KnowledgeBase:
             elif isinstance(embedding, list):
                 embedding_list = embedding
             else:
-                logger.warning(f"Skipping entry for '{identifier}' due to unsupported embedding type: {type(embedding)}")
+                logger.warning(f"Skipping entry for '{identifier}' due to unsupported embedding type: {type(embedding)}") # <<< Use logger
                 count_skipped += 1
                 continue
 
@@ -250,14 +273,19 @@ class KnowledgeBase:
                     documents=documents_batch
                 )
                 count_added = len(ids_batch)
-                self._progress(f"Upserted {count_added} pre-computed document entries to ChromaDB.")
+                upsert_msg = f"Upserted {count_added} pre-computed document entries to ChromaDB."
+                self._progress(upsert_msg)
+                logger.info(upsert_msg) # <<< Use logger
             except Exception as e:
-                self._progress(f"[ERROR] Failed to upsert pre-computed batch to ChromaDB: {e}")
-                logger.error("ChromaDB upsert failed for pre-computed batch", exc_info=True)
+                err_msg = f"Failed to upsert pre-computed batch to ChromaDB: {e}"
+                self._progress(f"[ERROR] {err_msg}")
+                logger.error(err_msg, exc_info=True) # <<< Use logger
                 count_skipped += len(ids_batch) # Count them as skipped if upsert failed
 
         if count_skipped > 0:
-             self._progress(f"[WARN] Skipped {count_skipped} pre-computed entries due to errors or missing data.")
+             warn_msg = f"Skipped {count_skipped} pre-computed entries due to errors or missing data."
+             self._progress(f"[WARN] {warn_msg}")
+             logger.warning(warn_msg) # <<< Use logger
 
     def add_scraped_content(self, url: str, markdown_content: str):
         """
@@ -265,15 +293,20 @@ class KnowledgeBase:
         Uses upsert based on URL.
         """
         if not markdown_content or not markdown_content.strip():
-            self._progress(f"[WARN] Skipping empty scraped content from {url}.")
+            warn_msg = f"Skipping empty scraped content from {url}."
+            self._progress(f"[WARN] {warn_msg}")
+            logger.warning(warn_msg) # <<< Use logger
             return False
 
         self._progress(f"Embedding scraped content from: {url}")
+        logger.info(f"Embedding scraped content from: {url}") # <<< Use logger
         try:
             emb = self.embedder.embed(markdown_content)
 
             if emb is None:
-                self._progress(f"[WARN] Failed to generate embedding for scraped content from {url}. Skipping.")
+                warn_msg = f"Failed to generate embedding for scraped content from {url}. Skipping."
+                self._progress(f"[WARN] {warn_msg}")
+                logger.warning(warn_msg) # <<< Use logger
                 return False
 
             # Create metadata
@@ -293,12 +326,15 @@ class KnowledgeBase:
                 metadatas=[metadata],
                 documents=[markdown_content] # Store the full text
             )
-            self._progress(f"Successfully upserted scraped content from {url} to knowledge base.")
+            success_msg = f"Successfully upserted scraped content from {url} to knowledge base."
+            self._progress(success_msg)
+            logger.info(success_msg) # <<< Use logger
             return True
 
         except Exception as e:
-            self._progress(f"[ERROR] Failed to process scraped content from {url}: {e}")
-            logger.error(f"Error processing scraped content from {url}:", exc_info=True)
+            err_msg = f"Failed to process scraped content from {url}: {e}"
+            self._progress(f"[ERROR] {err_msg}")
+            logger.error(err_msg, exc_info=True) # <<< Use logger
             return False
 
     def search(self, query: str, top_k: int = 3, filter_metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
@@ -315,16 +351,21 @@ class KnowledgeBase:
                                   Returns empty list on failure or if no results found.
         """
         self._progress(f"Searching knowledge base for query: '{query[:50]}...'")
+        logger.info(f"Searching knowledge base for query: '{query[:50]}...'") # <<< Use logger
         try:
             # Check if collection is empty (optional, query might handle it)
-            if self.collection.count() == 0:
+            count = self.collection.count()
+            if count == 0:
                 self._progress("Knowledge base collection is empty. Cannot perform search.")
+                logger.warning("Knowledge base collection is empty. Cannot perform search.") # <<< Use logger
                 return []
 
             query_embedding = self.embedder.embed(query)
 
             if query_embedding is None:
-                self._progress("[ERROR] Could not generate query embedding. Search failed.")
+                err_msg = "Could not generate query embedding. Search failed."
+                self._progress(f"[ERROR] {err_msg}")
+                logger.error(err_msg) # <<< Use logger
                 return []
 
             # Perform the query
@@ -333,7 +374,7 @@ class KnowledgeBase:
 
             results = self.collection.query(
                 query_embeddings=query_emb_list,
-                n_results=top_k,
+                n_results=min(top_k, count), # Ensure n_results <= collection count
                 where=filter_metadata, # Add metadata filter if provided
                 include=['metadatas', 'distances'] # Request metadata and distances
             )
@@ -343,6 +384,7 @@ class KnowledgeBase:
             # Each list corresponds to a query embedding (we only have one)
             if not results or not results.get('ids') or not results['ids'][0]:
                 self._progress("Search returned no results.")
+                logger.info("ChromaDB search returned no results.") # <<< Use logger
                 return []
 
             # Extract metadata and potentially distances for the first query
@@ -367,11 +409,13 @@ class KnowledgeBase:
                  formatted_results.sort(key=lambda x: x.get('score', 0.0), reverse=True)
 
             self._progress(f"Search found {len(formatted_results)} results.")
+            logger.info(f"ChromaDB search found {len(formatted_results)} results.") # <<< Use logger
             return formatted_results
 
         except Exception as e:
-            self._progress(f"[ERROR] Error during ChromaDB search: {e}")
-            logger.error("ChromaDB search failed", exc_info=True)
+            err_msg = f"Error during ChromaDB search: {e}"
+            self._progress(f"[ERROR] {err_msg}")
+            logger.error(err_msg, exc_info=True) # <<< Use logger
             return []
 
     def get_collection_count(self) -> int:
@@ -379,25 +423,30 @@ class KnowledgeBase:
         try:
             return self.collection.count()
         except Exception as e:
-            self._progress(f"[ERROR] Failed to get collection count: {e}")
-            logger.error("Failed to get ChromaDB collection count", exc_info=True)
+            err_msg = f"Failed to get collection count: {e}"
+            self._progress(f"[ERROR] {err_msg}")
+            logger.error(err_msg, exc_info=True) # <<< Use logger
             return 0
 
     def clear_collection(self):
         """Deletes and recreates the collection."""
         self._progress(f"Attempting to clear collection: '{self.collection_name}'")
+        logger.info(f"Attempting to clear collection: '{self.collection_name}'") # <<< Use logger
         try:
             self.client.delete_collection(name=self.collection_name)
             self.collection = self.client.get_or_create_collection(name=self.collection_name)
             self._progress(f"Collection '{self.collection_name}' cleared and recreated.")
+            logger.info(f"Collection '{self.collection_name}' cleared and recreated.") # <<< Use logger
         except Exception as e:
-            self._progress(f"[ERROR] Failed to clear ChromaDB collection: {e}")
-            logger.error("Failed to clear ChromaDB collection", exc_info=True)
+            err_msg = f"Failed to clear ChromaDB collection: {e}"
+            self._progress(f"[ERROR] {err_msg}")
+            logger.error(err_msg, exc_info=True) # <<< Use logger
             # Attempt to recreate just in case deletion failed partially
             try:
                 self.collection = self.client.get_or_create_collection(name=self.collection_name)
             except Exception as e2:
-                 self._progress(f"[ERROR] Failed to recreate ChromaDB collection after clear error: {e2}")
-                 logger.error("Failed to recreate ChromaDB collection", exc_info=True)
+                 err_msg2 = f"Failed to recreate ChromaDB collection after clear error: {e2}"
+                 self._progress(f"[ERROR] {err_msg2}")
+                 logger.error(err_msg2, exc_info=True) # <<< Use logger
                  # Raise the original error?
                  raise e

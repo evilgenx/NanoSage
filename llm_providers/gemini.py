@@ -4,9 +4,12 @@ import google.generativeai as genai
 import google.api_core.exceptions
 import requests.exceptions # Needed for listing models error handling
 import backoff
+import logging # <<< Import logging
 
 # Import the custom backoff handler
 from .base import handle_rate_limit
+
+logger = logging.getLogger(__name__) # <<< Get logger
 
 # --- Model Listing Functions ---
 
@@ -17,7 +20,7 @@ def list_gemini_models(gemini_api_key=None):
     # Prioritize passed key, fallback to environment variable
     api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
     if not api_key:
-        print("[ERROR] Gemini API key not provided via parameter or environment variable for listing models.")
+        logger.error("Gemini API key not provided via parameter or environment variable for listing models.") # <<< Use logger
         return None # Indicate failure due to missing key
     try:
         genai.configure(api_key=api_key)
@@ -25,11 +28,11 @@ def list_gemini_models(gemini_api_key=None):
         # Filter for models supporting 'generateContent'
         supported_models = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
         if not supported_models:
-            print("[WARN] No Gemini models found supporting 'generateContent'.")
+            logger.warning("No Gemini models found supporting 'generateContent'.") # <<< Use logger
             return []
         return supported_models
     except Exception as e:
-        print(f"[ERROR] Failed to list Gemini models: {e}")
+        logger.error(f"Failed to list Gemini models: {e}", exc_info=True) # <<< Use logger with traceback
         return None # Indicate failure
 
 # Removed list_gemini_embedding_models function
@@ -49,26 +52,28 @@ def list_gemini_models(gemini_api_key=None):
 def call_gemini(prompt, model_name, gemini_api_key=None):
     """Calls the Gemini API with a specified model, with retry logic."""
     if not model_name:
-        print("[ERROR] No Gemini model specified for the API call.")
+        logger.error("No Gemini model specified for the API call.") # <<< Use logger
         return "Error: No Gemini model specified."
     # Prioritize passed key, fallback to environment variable
     api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
     if not api_key:
-        print("[ERROR] Gemini API key not provided via parameter or environment variable.")
+        logger.error("Gemini API key not provided via parameter or environment variable.") # <<< Use logger
         return "Error: Gemini API key not configured."
     try:
         # Configure API key for this call (safe even if called multiple times)
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
+        logger.debug(f"Calling Gemini model '{model_name}'...") # <<< Use logger
         response = model.generate_content(prompt)
         # Handle potential safety blocks or empty responses
         if not response.parts:
-             print(f"[WARN] Gemini response blocked or empty. Reason: {response.prompt_feedback}")
+             logger.warning(f"Gemini response blocked or empty. Reason: {response.prompt_feedback}") # <<< Use logger
              # Consider returning a more informative error or fallback
              return f"Error: Gemini response blocked or empty. Reason: {response.prompt_feedback}"
+        logger.debug(f"Gemini call successful for model '{model_name}'.") # <<< Use logger
         return response.text
     except Exception as e:
-        print(f"[ERROR] Gemini API call failed: {e}")
+        logger.error(f"Gemini API call failed for model '{model_name}': {e}", exc_info=True) # <<< Use logger with traceback
         # Re-raise the exception for backoff to catch it
         raise e
 

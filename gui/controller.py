@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # gui/controller.py
 
-import logging
-import logging
+import logging # <<< Keep only one import
 import os
 import re # Keep re for refinement content extraction if needed here, or move if fully delegated
 from PyQt6.QtCore import QObject, pyqtSignal, Qt, QModelIndex
@@ -22,9 +21,12 @@ try:
     from .workers import ScrapeWorker # Import the worker (will create later)
     from .config_editor_dialog import ConfigEditorDialog # <<< Import the new config dialog
 except ImportError as e:
-    print(f"Error importing sub-controllers/dialogs in controller.py: {e}")
+    # Use logger here if possible, but it might fail early
+    logging.error(f"Error importing sub-controllers/dialogs in controller.py: {e}", exc_info=True) # <<< Use logger
     import sys
     sys.exit(1)
+
+logger = logging.getLogger(__name__) # <<< Get logger
 
 class GuiController(QObject):
     """
@@ -87,20 +89,22 @@ class GuiController(QObject):
         """Helper to call MainWindow's log_status."""
         # Keep this simple helper
         if self.main_window:
+            # Log to main window status area AND logger
+            logger.info(f"Status Update: {message}") # <<< Use logger
             self.main_window.log_status(message)
 
     # --- New Slots to Handle Signals from Sub-Controllers ---
 
     def _handle_search_complete(self, report_path, final_answer_content, toc_tree_nodes):
         """Handles successful search completion signal from SearchOrchestrator."""
-        self.log_status("GuiController received search complete signal.")
+        logger.info("GuiController received search complete signal.") # <<< Use logger
         # Delegate display to ResultDisplayManager
         self.result_display_manager.display_results_and_toc(report_path, final_answer_content, toc_tree_nodes)
         # Finalize UI is now handled by direct signal connection
 
     def _handle_search_error(self, error_message):
         """Handles search error signal from SearchOrchestrator."""
-        self.log_status(f"GuiController received search error signal: {error_message}")
+        logger.error(f"GuiController received search error signal: {error_message}") # <<< Use logger
         # QMessageBox is now shown by handle_structured_progress for 'error' type
         # QMessageBox.critical(self.main_window, "Search Error", error_message)
         # Optionally clear results or update status label via ResultDisplayManager
@@ -111,11 +115,11 @@ class GuiController(QObject):
 
     def _handle_refinement_request(self, anchor_id, instruction):
         """Handles refinement request signal from ResultDisplayManager."""
-        self.log_status(f"GuiController received refinement request for anchor: {anchor_id}")
+        logger.info(f"GuiController received refinement request for anchor: {anchor_id}") # <<< Use logger
         # Get current HTML from display manager before starting refinement
         current_html = self.result_display_manager.current_report_html
         if not current_html:
-            self.log_status("[Error] Cannot start refinement: No current report HTML available.")
+            logger.error("Cannot start refinement: No current report HTML available.") # <<< Use logger
             QMessageBox.warning(self.main_window, "Refinement Error", "Cannot refine section, no report content loaded.")
             return
         # Delegate to RefinementController
@@ -123,14 +127,14 @@ class GuiController(QObject):
 
     def _handle_refinement_complete(self, anchor_id, refined_content):
         """Handles refinement complete signal from RefinementController."""
-        self.log_status(f"GuiController received refinement complete for anchor: {anchor_id}")
+        logger.info(f"GuiController received refinement complete for anchor: {anchor_id}") # <<< Use logger
         # Delegate updating the display to ResultDisplayManager
         self.result_display_manager.update_refined_section(anchor_id, refined_content)
 
     def _handle_refinement_error(self, anchor_id, error_message):
         """Handles refinement error signal from RefinementController."""
         # Error message box is already shown by RefinementController, just log here.
-        self.log_status(f"GuiController received refinement error for anchor '{anchor_id}': {error_message}")
+        logger.error(f"GuiController received refinement error for anchor '{anchor_id}': {error_message}") # <<< Use logger
         # No further action needed here usually, UI reset handled by RefinementController
 
     # --- Keep Cache Management Here (for now) ---
@@ -148,17 +152,19 @@ class GuiController(QObject):
 
         if reply == QMessageBox.StandardButton.Yes:
             self.log_status(f"Attempting to clear cache: {cache_db_path}")
+            logger.info(f"Attempting to clear cache: {cache_db_path}") # <<< Use logger
             try:
                 # Use a temporary CacheManager instance just for clearing
                 temp_cache_manager = CacheManager(cache_db_path)
                 temp_cache_manager.clear_all_cache() # This deletes and recreates
                 temp_cache_manager.close() # Close the connection
                 self.log_status("Cache cleared successfully.")
+                logger.info("Cache cleared successfully.") # <<< Use logger
                 QMessageBox.information(self.main_window, "Cache Cleared", "The cache database has been cleared.")
             except Exception as e:
                 error_msg = f"Failed to clear cache: {e}"
                 self.log_status(f"[ERROR] {error_msg}")
-                logging.exception("Error during cache clearing") # Log full traceback
+                logger.exception("Error during cache clearing") # <<< Use logger.exception
                 QMessageBox.critical(self.main_window, "Cache Error", error_msg)
 
 
@@ -166,6 +172,7 @@ class GuiController(QObject):
     def cancel_current_operation(self):
         """Requests cancellation of the currently running operation (delegates)."""
         self.log_status("Cancel requested by user.")
+        logger.info("Cancel requested by user.") # <<< Use logger
         # Primarily delegate to SearchOrchestrator as it handles the main cancellable task
         cancelled = self.search_orchestrator.cancel_current_operation()
         if not cancelled:
@@ -173,22 +180,27 @@ class GuiController(QObject):
             # e.g., if refinement could be cancelled:
             # cancelled = self.refinement_controller.cancel_refinement()
             self.log_status("No active cancellable operation found to cancel.")
+            logger.info("No active cancellable operation found to cancel.") # <<< Use logger
 
 
     # --- Updated Cleanup ---
     def shutdown_workers(self):
         """Stop all running worker threads by delegating to sub-controllers."""
         self.log_status("Shutting down controller and all sub-component workers...")
+        logger.info("Shutting down controller and all sub-component workers...") # <<< Use logger
         self.search_orchestrator.shutdown_workers()
         self.refinement_controller.shutdown_worker()
         self.model_fetcher_manager.shutdown_workers()
         # Add shutdown for ResultDisplayManager if it ever gets workers
         if self.scrape_worker and self.scrape_worker.isRunning():
             self.log_status("Stopping active scrape worker...")
+            logger.info("Stopping active scrape worker...") # <<< Use logger
             self.scrape_worker.stop() # Assuming worker has a stop method
             self.scrape_worker.wait() # Wait for it to finish cleanly
             self.log_status("Scrape worker stopped.")
+            logger.info("Scrape worker stopped.") # <<< Use logger
         self.log_status("All worker shutdown routines called.")
+        logger.info("All worker shutdown routines called.") # <<< Use logger
 
     # --- Scraping Dialog and Logic ---
 
@@ -203,6 +215,7 @@ class GuiController(QObject):
             values = dialog.get_values()
             if values:
                 self.log_status(f"Starting scrape for URL: {values['url']} with depth {values['depth']}")
+                logger.info(f"Starting scrape for URL: {values['url']} with depth {values['depth']}") # <<< Use logger
                 # Pass the depth value to the worker starter
                 self._start_scrape_worker(values['url'], values['ignore_robots'], values['depth'])
 
@@ -230,6 +243,7 @@ class GuiController(QObject):
     def _handle_scrape_complete(self, url, content_snippet):
         """Handles successful completion of the scraping process."""
         self.log_status(f"Successfully scraped and added content from {url} to knowledge base.")
+        logger.info(f"Successfully scraped and added content from {url} to knowledge base.") # <<< Use logger
         QMessageBox.information(self.main_window, "Scrape Complete",
                                 f"Successfully scraped and added content from:\n{url}\n\nSnippet:\n{content_snippet}...")
         # UI reset is handled in _scrape_worker_finished
@@ -237,6 +251,7 @@ class GuiController(QObject):
     def _handle_scrape_error(self, url, error_message):
         """Handles errors during the scraping process."""
         self.log_status(f"[ERROR] Scraping failed for {url}: {error_message}")
+        logger.error(f"Scraping failed for {url}: {error_message}") # <<< Use logger
         QMessageBox.critical(self.main_window, "Scrape Error",
                              f"Failed to scrape content from:\n{url}\n\nError: {error_message}")
         # UI reset is handled in _scrape_worker_finished
@@ -244,6 +259,7 @@ class GuiController(QObject):
     def _scrape_worker_finished(self):
         """Resets UI elements after the scrape worker finishes (success or error)."""
         self.log_status("Scrape worker finished.")
+        logger.info("Scrape worker finished.") # <<< Use logger
         self.main_window.progress_bar.setVisible(False)
         self.main_window.run_button.setEnabled(True)
         # self.main_window.cancel_button.setEnabled(False)
@@ -260,6 +276,7 @@ class GuiController(QObject):
             return
 
         self.log_status("Opening configuration editor...")
+        logger.info("Opening configuration editor...") # <<< Use logger
         # Pass the main window as parent
         self.config_editor_dialog = ConfigEditorDialog(config_path=self.config_path, parent=self.main_window)
         # Execute the dialog modally
@@ -267,6 +284,7 @@ class GuiController(QObject):
 
         if result == QDialog.DialogCode.Accepted:
             self.log_status("Configuration changes saved.")
+            logger.info("Configuration changes saved via editor.") # <<< Use logger
             # Reload config data in controller and main window
             self.config_data = load_config(self.config_path)
             self.main_window.config_data = self.config_data
@@ -274,6 +292,7 @@ class GuiController(QObject):
             self._apply_saved_config()
         else:
             self.log_status("Configuration editing cancelled.")
+            logger.info("Configuration editing cancelled.") # <<< Use logger
 
         # Clean up dialog reference
         self.config_editor_dialog = None
@@ -281,6 +300,7 @@ class GuiController(QObject):
     def _apply_saved_config(self):
         """Updates the main window UI elements based on the currently loaded self.config_data."""
         self.log_status("Applying saved configuration to main window UI...")
+        logger.info("Applying saved configuration to main window UI...") # <<< Use logger
         try:
             # Reload values into relevant main window widgets
             # This mirrors the logic in MainWindow.__init__ for setting initial states
@@ -303,7 +323,9 @@ class GuiController(QObject):
                      self.main_window.embedding_model_combo.setCurrentText(current_embedding_model)
                  else:
                      # If the saved model isn't valid for the current device, log warning
-                     self.log_status(f"[Warning] Saved embedding model '{current_embedding_model}' not available for device '{general_cfg.get('device', 'cpu')}'. UI might not reflect saved value.")
+                     warn_msg = f"Saved embedding model '{current_embedding_model}' not available for device '{general_cfg.get('device', 'cpu')}'. UI might not reflect saved value."
+                     self.log_status(f"[Warning] {warn_msg}")
+                     logger.warning(warn_msg) # <<< Use logger
 
             # Search Tab Widgets
             search_cfg = self.config_data.get('search', {})
@@ -339,8 +361,10 @@ class GuiController(QObject):
             self.main_window.cache_enabled_checkbox.setChecked(cache_cfg.get('enabled', False))
 
             self.log_status("Main window UI updated with saved configuration.")
+            logger.info("Main window UI updated with saved configuration.") # <<< Use logger
 
         except Exception as e:
-            self.log_status(f"[ERROR] Failed to apply saved configuration to UI: {e}")
-            logging.exception("Error applying saved config")
+            err_msg = f"Failed to apply saved configuration to UI: {e}"
+            self.log_status(f"[ERROR] {err_msg}")
+            logger.exception("Error applying saved config") # <<< Use logger.exception
             QMessageBox.warning(self.main_window, "UI Update Error", f"Could not fully update the main window UI with the saved settings: {e}")

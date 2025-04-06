@@ -55,12 +55,12 @@ def summarize_web_results(web_results, config, resolved_settings, progress_callb
 
             if scrape_error:
                 warn_msg = f"Failed to scrape {url}: {scrape_error}"
-                logger.warning(warn_msg)
+                logger.warning(warn_msg) # Keep logger call
                 send_progress(progress_callback, "log", {"level": "warning", "message": warn_msg})
                 error_msg = f"[Scraping failed: {scrape_error}]"
             elif not content:
                 warn_msg = f"No content extracted or returned from URL: {url}"
-                logger.warning(warn_msg)
+                logger.warning(warn_msg) # Keep logger call
                 send_progress(progress_callback, "log", {"level": "warning", "message": warn_msg})
                 error_msg = "[No content extracted or returned]"
 
@@ -76,14 +76,14 @@ def summarize_web_results(web_results, config, resolved_settings, progress_callb
                 )
                 if not summary or summary.startswith("Error:"):
                     err_msg = f"Failed to summarize content from {url}: {summary}"
-                    logger.error(err_msg)
+                    logger.error(err_msg) # Keep logger call
                     send_progress(progress_callback, "log", {"level": "error", "message": err_msg})
                     error_msg = f"[Summarization failed: {summary}]"
                     summary = None # Ensure summary is None if it failed
 
         except Exception as e:
             err_msg = f"Unexpected error processing {url}: {e}"
-            logger.error(err_msg, exc_info=True)
+            logger.error(err_msg, exc_info=True) # Keep logger call
             send_progress(progress_callback, "log", {"level": "error", "message": err_msg, "details": traceback.format_exc()})
             error_msg = f"[Unexpected error during processing: {e}]"
             content = None # Ensure content is None on unexpected error
@@ -158,12 +158,12 @@ def summarize_local_results(local_results, config, resolved_settings, progress_c
                 content = parser.parse(file_path)
                 if not content:
                     warn_msg = f"No content extracted from file: {file_path}"
-                    logger.warning(warn_msg)
+                    logger.warning(warn_msg) # Keep logger call
                     send_progress(progress_callback, "log", {"level": "warning", "message": warn_msg})
                     error_msg = "[No content extracted]"
             else:
                 warn_msg = f"No suitable parser found for file: {file_path}"
-                logger.warning(warn_msg)
+                logger.warning(warn_msg) # Keep logger call
                 send_progress(progress_callback, "log", {"level": "warning", "message": warn_msg})
                 error_msg = "[Unsupported file type or parser error]"
 
@@ -179,14 +179,14 @@ def summarize_local_results(local_results, config, resolved_settings, progress_c
                 )
                 if not summary or summary.startswith("Error:"):
                     err_msg = f"Failed to summarize content from {file_path}: {summary}"
-                    logger.error(err_msg)
+                    logger.error(err_msg) # Keep logger call
                     send_progress(progress_callback, "log", {"level": "error", "message": err_msg})
                     error_msg = f"[Summarization failed: {summary}]"
                     summary = None # Ensure summary is None if it failed
 
         except Exception as e:
             err_msg = f"Error processing file {file_path}: {e}"
-            logger.error(err_msg, exc_info=True)
+            logger.error(err_msg, exc_info=True) # Keep logger call
             send_progress(progress_callback, "log", {"level": "error", "message": err_msg, "details": traceback.format_exc()})
             error_msg = f"[Error processing content: {e}]"
             content = None # Ensure content is None on unexpected error

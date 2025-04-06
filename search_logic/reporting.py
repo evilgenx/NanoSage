@@ -5,6 +5,9 @@ from aggregator import aggregate_results
 from typing import Optional, Dict, Any # Added import
 # Import send_progress helper
 from .web_recursive import send_progress # Use relative import
+import logging # <<< Import logging
+
+logger = logging.getLogger(__name__) # <<< Get logger
 
 def build_final_answer(
     enhanced_query,
@@ -84,7 +87,7 @@ def build_final_answer(
     rag_call_msg = f"Calling final RAG model ({resolved_settings['rag_model']})..."
     send_progress(progress_callback, "status", {"message": rag_call_msg})
     send_progress(progress_callback, "log", {"level": "info", "message": rag_call_msg})
-    print("[DEBUG] Final RAG prompt formatted. Passing to rag_final_answer()...")
+    logger.debug("Final RAG prompt formatted. Passing to rag_final_answer()...") # <<< Use logger
     # Assemble llm_config for the final RAG task
     provider = resolved_settings.get('rag_model', 'gemma')
     model_id = resolved_settings.get(f"{provider}_model_id") # e.g., gemini_model_id
@@ -150,22 +153,22 @@ def _insert_anchors_into_report(report_content, toc_nodes):
             # Replace only the first occurrence of this specific heading match
             try:
                 # Use a temporary placeholder to avoid re-matching issues if query text appears multiple times
-                placeholder = f"__ANCHOR_PLACEHOLDER_{node.anchor_id}__"
-                temp_content, num_replacements = pattern.subn(placeholder, current_content, count=1)
-                if num_replacements > 0:
-                    current_content = temp_content.replace(placeholder, replacement, 1)
-                    processed_anchors.add(node.anchor_id)
-                    print(f"[DEBUG] Inserted anchor '{node.anchor_id}' for heading: {node.query_text}")
-                else:
-                     print(f"[DEBUG] Could not insert anchor '{node.anchor_id}'. Heading not found for: {node.query_text}")
+                    placeholder = f"__ANCHOR_PLACEHOLDER_{node.anchor_id}__"
+                    temp_content, num_replacements = pattern.subn(placeholder, current_content, count=1)
+                    if num_replacements > 0:
+                        current_content = temp_content.replace(placeholder, replacement, 1)
+                        processed_anchors.add(node.anchor_id)
+                        logger.debug(f"Inserted anchor '{node.anchor_id}' for heading: {node.query_text}") # <<< Use logger
+                    else:
+                         logger.debug(f"Could not insert anchor '{node.anchor_id}'. Heading not found for: {node.query_text}") # <<< Use logger
 
             except Exception as e:
-                 print(f"[ERROR] Error inserting anchor {node.anchor_id}: {e}")
+                 logger.error(f"Error inserting anchor {node.anchor_id}: {e}", exc_info=True) # <<< Use logger
                  # Continue with original content if replacement fails
                  pass # Keep original current_content
 
         else:
-             print(f"[DEBUG] Heading pattern not found for anchor '{node.anchor_id}': {node.query_text}")
+             logger.debug(f"Heading pattern not found for anchor '{node.anchor_id}': {node.query_text}") # <<< Use logger
 
 
         # Process children recursively
@@ -197,7 +200,7 @@ def save_report(
     """Saves the final aggregated report."""
     save_msg = "Aggregating results and saving report..."
     send_progress(progress_callback, "phase_start", {"phase": "save_report", "message": save_msg})
-    print("[INFO] Saving final report to disk...")
+    logger.info("Saving final report to disk...") # <<< Use logger
     output_path = aggregate_results(
         query_id,
         enhanced_query,

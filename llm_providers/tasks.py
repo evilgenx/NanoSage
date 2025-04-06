@@ -29,35 +29,36 @@ def chain_of_thought_query_enhancement(query, llm_config: dict = {}):
         "Provide your reasoning, and at the end output the line 'Final Enhanced Query:' followed by the enhanced query."
     )
     raw_output = ""
+    logger.info(f"Attempting query enhancement using {provider}...") # <<< Use logger
     try:
         if provider == "gemini":
-            print("[INFO] Using Gemini for query enhancement.")
+            # logger.info("Using Gemini for query enhancement.") # Redundant with above
             if not model_id:
-                print("[ERROR] Gemini selected for query enhancement, but no model specified.")
+                logger.error("Gemini selected for query enhancement, but no model specified.") # <<< Use logger
                 return query # Fallback
             raw_output = call_gemini(prompt, model_name=model_id, gemini_api_key=api_key)
         elif provider == "openrouter":
-            print("[INFO] Using OpenRouter for query enhancement.")
+            # logger.info("Using OpenRouter for query enhancement.") # Redundant with above
             if not model_id:
-                 print("[WARN] No OpenRouter model specified for query enhancement, falling back to default.")
+                 logger.warning("No OpenRouter model specified for query enhancement, falling back to default.") # <<< Use logger
                  return query # Fallback
             raw_output = call_openrouter(prompt, model=model_id, personality=personality, openrouter_api_key=api_key)
         else: # Default to gemma/ollama
             if provider != "gemma":
-                print(f"[WARN] Unknown provider '{provider}' for query enhancement, defaulting to gemma.")
-            print("[INFO] Using Gemma (Ollama) for query enhancement.")
+                logger.warning(f"Unknown provider '{provider}' for query enhancement, defaulting to gemma.") # <<< Use logger
+            # logger.info("Using Gemma (Ollama) for query enhancement.") # Redundant with above
             # Pass model_id to gemma if provided, otherwise it uses its default
             gemma_model = model_id or "gemma2:2b" # Example default if not specified
             raw_output = call_gemma(prompt, model=gemma_model, personality=personality)
 
         if not raw_output or raw_output.startswith("Error:"): # Handle potential API errors or empty output
-            print(f"[WARN] Query enhancement failed or returned error: {raw_output}. Falling back to original query.")
+            logger.warning(f"Query enhancement failed or returned error: {raw_output}. Falling back to original query.") # <<< Use logger
             return query # Fallback to original query if enhancement fails
 
         return extract_final_query(raw_output)
 
     except Exception as e:
-        print(f"[ERROR] Exception during query enhancement with {provider}: {e}. Falling back to original query.")
+        logger.error(f"Exception during query enhancement with {provider}: {e}. Falling back to original query.", exc_info=True) # <<< Use logger with traceback
         # Log the exception details if needed
         return query # Fallback in case of unexpected errors during the call
 
@@ -88,27 +89,27 @@ def extract_topics_from_text(text: str, llm_config: dict = {}, max_topics=5) -> 
     )
 
     raw_output = ""
-    print(f"[INFO] Extracting topics from text using {provider}...")
+    logger.info(f"Extracting topics from text using {provider}...") # <<< Use logger
     try:
         if provider == "gemini":
             if not model_id:
-                print("[ERROR] Gemini selected for topic extraction, but no model specified.")
+                logger.error("Gemini selected for topic extraction, but no model specified.") # <<< Use logger
                 return "Error: Gemini model not specified."
             raw_output = call_gemini(prompt, model_name=model_id, gemini_api_key=api_key)
         elif provider == "openrouter":
             if not model_id:
-                print("[ERROR] OpenRouter selected for topic extraction, but no model specified.")
+                logger.error("OpenRouter selected for topic extraction, but no model specified.") # <<< Use logger
                 return "Error: OpenRouter model not specified."
             raw_output = call_openrouter(prompt, model=model_id, personality=personality, openrouter_api_key=api_key)
         else: # Default to gemma/ollama
             if provider != "gemma":
-                print(f"[WARN] Unknown provider '{provider}' for topic extraction, defaulting to gemma.")
+                logger.warning(f"Unknown provider '{provider}' for topic extraction, defaulting to gemma.") # <<< Use logger
             gemma_model = model_id or "gemma2:2b" # Example default
             raw_output = call_gemma(prompt, model=gemma_model, personality=personality)
 
         if not raw_output or raw_output.startswith("Error:"):
             error_msg = raw_output if raw_output else "Error: Topic extraction failed (empty response)."
-            print(f"[WARN] Topic extraction failed or returned error: {error_msg}")
+            logger.warning(f"Topic extraction failed or returned error: {error_msg}") # <<< Use logger
             return error_msg # Return the error message
 
         # Return the raw output, assuming the LLM followed the prompt (one topic per line)
@@ -116,7 +117,7 @@ def extract_topics_from_text(text: str, llm_config: dict = {}, max_topics=5) -> 
         return raw_output.strip()
 
     except Exception as e:
-        print(f"[ERROR] Exception during topic extraction ({provider}): {e}")
+        logger.error(f"Exception during topic extraction ({provider}): {e}", exc_info=True) # <<< Use logger with traceback
         return f"Error: Failed to extract topics with {provider} - {e}"
 
 
@@ -294,33 +295,33 @@ def rag_final_answer(aggregation_prompt, llm_config: dict = {}):
     api_key = llm_config.get("api_key")
     personality = llm_config.get("personality")
 
-    print("[INFO] Performing final RAG generation using provider:", provider)
+    logger.info(f"Performing final RAG generation using provider: {provider}") # <<< Use logger
     try:
         if provider == "gemma":
             gemma_model = model_id or "gemma2:2b" # Example default
             return call_gemma(aggregation_prompt, model=gemma_model, personality=personality)
         elif provider == "pali": # Note: 'pali' seems to just modify the prompt for gemma here
             modified_prompt = f"PALI mode analysis:\n\n{aggregation_prompt}"
-            print("[INFO] Using Gemma (Ollama) with PALI mode prompt.")
+            logger.info("Using Gemma (Ollama) with PALI mode prompt.") # <<< Use logger
             gemma_model = model_id or "gemma2:2b" # Example default
             return call_gemma(modified_prompt, model=gemma_model, personality=personality)
         elif provider == "gemini":
             if not model_id:
-                print("[ERROR] Gemini selected for RAG, but no model specified.")
+                logger.error("Gemini selected for RAG, but no model specified.") # <<< Use logger
                 return "Error: Gemini model not specified for RAG."
             return call_gemini(aggregation_prompt, model_name=model_id, gemini_api_key=api_key)
         elif provider == "openrouter":
-            print("[INFO] Using OpenRouter for final RAG generation.")
+            # logger.info("Using OpenRouter for final RAG generation.") # Redundant
             if not model_id:
-                 print("[ERROR] No OpenRouter model specified for RAG.")
+                 logger.error("No OpenRouter model specified for RAG.") # <<< Use logger
                  return "Error: No OpenRouter model specified."
             return call_openrouter(aggregation_prompt, model=model_id, personality=personality, openrouter_api_key=api_key)
         else: # Default or unknown, fall back to gemma
-            print(f"[WARN] Unknown provider '{provider}', defaulting to gemma.")
+            logger.warning(f"Unknown provider '{provider}', defaulting to gemma.") # <<< Use logger
             gemma_model = model_id or "gemma2:2b" # Example default
             return call_gemma(aggregation_prompt, model=gemma_model, personality=personality)
     except Exception as e:
-        print(f"[ERROR] Exception during RAG final answer generation ({provider}): {e}")
+        logger.error(f"Exception during RAG final answer generation ({provider}): {e}", exc_info=True) # <<< Use logger with traceback
         return f"Error: Failed to generate final answer with {provider} - {e}"
 
 # Modified follow_up_conversation to accept llm_config dictionary
@@ -332,25 +333,25 @@ def follow_up_conversation(follow_up_prompt, llm_config: dict = {}):
     api_key = llm_config.get("api_key")
     personality = llm_config.get("personality")
 
-    print(f"[INFO] Handling follow-up conversation using {provider}...")
+    logger.info(f"Handling follow-up conversation using {provider}...") # <<< Use logger
     try:
         if provider == "gemini":
             if not model_id:
-                print("[ERROR] Gemini selected for follow-up, but no model specified.")
+                logger.error("Gemini selected for follow-up, but no model specified.") # <<< Use logger
                 return "Error: Gemini model not specified for follow-up."
             return call_gemini(follow_up_prompt, model_name=model_id, gemini_api_key=api_key)
         elif provider == "openrouter":
             if not model_id:
-                print("[ERROR] OpenRouter selected for follow-up, but no model specified.")
+                logger.error("OpenRouter selected for follow-up, but no model specified.") # <<< Use logger
                 return "Error: OpenRouter model not specified for follow-up."
             return call_openrouter(follow_up_prompt, model=model_id, personality=personality, openrouter_api_key=api_key)
         else: # Default to gemma/ollama
             if provider != "gemma":
-                print(f"[WARN] Unknown provider '{provider}' for follow-up, defaulting to gemma.")
+                logger.warning(f"Unknown provider '{provider}' for follow-up, defaulting to gemma.") # <<< Use logger
             gemma_model = model_id or "gemma2:2b" # Example default
             return call_gemma(follow_up_prompt, model=gemma_model, personality=personality)
     except Exception as e:
-        print(f"[ERROR] Exception during follow-up conversation ({provider}): {e}")
+        logger.error(f"Exception during follow-up conversation ({provider}): {e}", exc_info=True) # <<< Use logger with traceback
         return f"Error: Failed to handle follow-up with {provider} - {e}"
 
 
@@ -383,26 +384,26 @@ def generate_followup_queries(initial_query: str, context_summary: str, llm_conf
     )
 
     raw_output = ""
-    print(f"[INFO] Generating follow-up queries using {provider}...")
+    logger.info(f"Generating follow-up queries using {provider}...") # <<< Use logger
     try:
         if provider == "gemini":
             if not model_id:
-                print("[ERROR] Gemini selected for follow-up query generation, but no model specified.")
+                logger.error("Gemini selected for follow-up query generation, but no model specified.") # <<< Use logger
                 return []
             raw_output = call_gemini(prompt, model_name=model_id, gemini_api_key=api_key)
         elif provider == "openrouter":
             if not model_id:
-                print("[ERROR] OpenRouter selected for follow-up query generation, but no model specified.")
+                logger.error("OpenRouter selected for follow-up query generation, but no model specified.") # <<< Use logger
                 return []
             raw_output = call_openrouter(prompt, model=model_id, personality=personality, openrouter_api_key=api_key)
         else: # Default to gemma/ollama
             if provider != "gemma":
-                print(f"[WARN] Unknown provider '{provider}' for follow-up query generation, defaulting to gemma.")
+                logger.warning(f"Unknown provider '{provider}' for follow-up query generation, defaulting to gemma.") # <<< Use logger
             gemma_model = model_id or "gemma2:2b" # Example default
             raw_output = call_gemma(prompt, model=gemma_model, personality=personality)
 
         if not raw_output or raw_output.startswith("Error:"):
-            print(f"[WARN] Follow-up query generation failed or returned error: {raw_output}")
+            logger.warning(f"Follow-up query generation failed or returned error: {raw_output}") # <<< Use logger
             return []
 
         # Parse the output: split by lines, strip whitespace, filter empty lines
@@ -412,7 +413,7 @@ def generate_followup_queries(initial_query: str, context_summary: str, llm_conf
         return queries[:max_queries]
 
     except Exception as e:
-        print(f"[ERROR] Exception during follow-up query generation ({provider}): {e}")
+        logger.error(f"Exception during follow-up query generation ({provider}): {e}", exc_info=True) # <<< Use logger with traceback
         return [] # Return empty list on error
 
 
@@ -447,32 +448,32 @@ def refine_text_section(section_content: str, instruction: str, llm_config: dict
     )
 
     raw_output = ""
-    print(f"[INFO] Refining text section using {provider}...")
+    logger.info(f"Refining text section using {provider}...") # <<< Use logger
     try:
         if provider == "gemini":
             if not model_id:
-                print("[ERROR] Gemini selected for refinement, but no model specified.")
+                logger.error("Gemini selected for refinement, but no model specified.") # <<< Use logger
                 return "Error: Gemini model not specified for refinement."
             raw_output = call_gemini(prompt, model_name=model_id, gemini_api_key=api_key)
         elif provider == "openrouter":
             if not model_id:
-                print("[ERROR] OpenRouter selected for refinement, but no model specified.")
+                logger.error("OpenRouter selected for refinement, but no model specified.") # <<< Use logger
                 return "Error: OpenRouter model not specified for refinement."
             raw_output = call_openrouter(prompt, model=model_id, personality=personality, openrouter_api_key=api_key)
         else: # Default to gemma/ollama
             if provider != "gemma":
-                print(f"[WARN] Unknown provider '{provider}' for refinement, defaulting to gemma.")
+                logger.warning(f"Unknown provider '{provider}' for refinement, defaulting to gemma.") # <<< Use logger
             gemma_model = model_id or "gemma2:2b" # Example default
             raw_output = call_gemma(prompt, model=gemma_model, personality=personality)
 
         if not raw_output or raw_output.startswith("Error:"):
             error_msg = raw_output if raw_output else "Error: Refinement failed (empty response)."
-            print(f"[WARN] Refinement failed or returned error: {error_msg}")
+            logger.warning(f"Refinement failed or returned error: {error_msg}") # <<< Use logger
             return error_msg # Return the error message
 
         # Return the raw output, assuming the LLM followed the prompt
         return raw_output.strip()
 
     except Exception as e:
-        print(f"[ERROR] Exception during text refinement ({provider}): {e}")
+        logger.error(f"Exception during text refinement ({provider}): {e}", exc_info=True) # <<< Use logger with traceback
         return f"Error: Failed to refine text with {provider} - {e}"

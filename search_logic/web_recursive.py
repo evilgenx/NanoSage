@@ -11,6 +11,9 @@ from web_search import download_webpages_ddg, download_webpages_searxng, parse_h
 from embeddings.base import BaseEmbedder # Added import
 from cache_manager import CacheManager # Added import
 from typing import Optional, List, Dict, Any # Added import
+import logging # <<< Import logging
+
+logger = logging.getLogger(__name__) # <<< Get logger
 
 # Helper function for sending structured progress updates
 def send_progress(callback, message_type: str, data: Dict[str, Any]):
@@ -19,7 +22,7 @@ def send_progress(callback, message_type: str, data: Dict[str, Any]):
             callback({"type": message_type, **data})
         except Exception as e:
             # Avoid crashing the backend if the callback fails (e.g., GUI closed)
-            print(f"[WARN] Failed to send progress update ({message_type}): {e}")
+            logger.warning(f"Failed to send progress update ({message_type}): {e}", exc_info=True) # <<< Use logger
 
 async def perform_recursive_web_searches(
     subqueries: List[str],
@@ -58,8 +61,9 @@ async def perform_recursive_web_searches(
 
             # --- Cancellation Check ---
             if cancellation_check_callback and cancellation_check_callback():
-                send_progress(progress_callback, "log", {"level": "info", "message": "Cancellation requested during web recursion."})
-                print("[INFO] Cancellation requested in web_recursive loop.")
+                cancel_msg = "Cancellation requested during web recursion."
+                send_progress(progress_callback, "log", {"level": "info", "message": cancel_msg})
+                logger.info(cancel_msg) # <<< Use logger
                 raise asyncio.CancelledError("Search cancelled by user during web recursion")
             # --- End Cancellation Check ---
 
@@ -76,7 +80,7 @@ async def perform_recursive_web_searches(
 
             if node_embedding is None:
                  warn_msg = f"Failed to embed subquery '{sq_clean[:50]}...' for relevance check. Skipping branch."
-                 print(f"[WARN] {warn_msg}")
+                 logger.warning(warn_msg) # <<< Use logger
                  send_progress(progress_callback, "log", {"level": "warning", "message": warn_msg})
                  toc_node.status = TOCNode.STATUS_SKIPPED # Update status
                  send_progress(progress_callback, "toc_update", {"node_id": toc_node.node_id, "status": toc_node.status, "message": "Embedding failed"})
@@ -89,9 +93,9 @@ async def perform_recursive_web_searches(
 
 
             if relevance < min_relevance:
-                skip_msg = f"Skipping branch (low relevance {relevance:.2f}): '{sq_clean[:50]}...'"
-                send_progress(progress_callback, "log", {"level": "info", "message": skip_msg})
-                print(f"[INFO] Skipping branch '{sq_clean}' due to low relevance ({relevance:.2f} < {min_relevance}).")
+                skip_msg = f"Skipping branch '{sq_clean}' due to low relevance ({relevance:.2f} < {min_relevance})."
+                send_progress(progress_callback, "log", {"level": "info", "message": f"Skipping branch (low relevance {relevance:.2f}): '{sq_clean[:50]}...'"})
+                logger.info(skip_msg) # <<< Use logger
                 toc_node.status = TOCNode.STATUS_SKIPPED # Update status
                 send_progress(progress_callback, "toc_update", {"node_id": toc_node.node_id, "status": toc_node.status, "message": f"Low relevance {relevance:.2f}"})
                 continue # Skip this subquery
@@ -107,7 +111,7 @@ async def perform_recursive_web_searches(
             search_msg = f"Searching web (Depth {current_depth}, Rel: {relevance:.2f}): '{sq_clean[:50]}...'"
             send_progress(progress_callback, "status", {"message": search_msg}) # Keep as status for main label
             send_progress(progress_callback, "log", {"level": "info", "message": search_msg}) # Also log it
-            print(f"[DEBUG] Searching web for subquery '{sq_clean}' at depth={current_depth}...")
+            logger.debug(f"Searching web for subquery '{sq_clean}' at depth={current_depth}...") # <<< Use logger
 
             # --- Cancellation Check ---
             if cancellation_check_callback and cancellation_check_callback():
@@ -131,9 +135,9 @@ async def perform_recursive_web_searches(
                         # pageno defaults to 1 if not specified
                     )
                 else:
-                    warn_msg = "[WARN] SearXNG provider selected but base_url not found in config. Skipping web search."
-                    send_progress(progress_callback, "log", {"level": "warning", "message": warn_msg})
-                    print(warn_msg)
+                    warn_msg = "SearXNG provider selected but base_url not found in config. Skipping web search."
+                    send_progress(progress_callback, "log", {"level": "warning", "message": f"[WARN] {warn_msg}"})
+                    logger.warning(warn_msg) # <<< Use logger
             elif search_provider == 'duckduckgo':
                  # DDG still uses limit argument directly
                  search_limit = resolved_settings.get('search_max_results', 5)
@@ -145,9 +149,9 @@ async def perform_recursive_web_searches(
                       cache_manager=cache_manager # Pass cache_manager
                  )
             else:
-                 warn_msg = f"[WARN] Unknown search provider '{search_provider}'. Skipping web search."
-                 send_progress(progress_callback, "log", {"level": "warning", "message": warn_msg})
-                 print(warn_msg)
+                 warn_msg = f"Unknown search provider '{search_provider}'. Skipping web search."
+                 send_progress(progress_callback, "log", {"level": "warning", "message": f"[WARN] {warn_msg}"})
+                 logger.warning(warn_msg) # <<< Use logger
             # --- End search function selection ---
 
             # --- Cancellation Check ---
@@ -184,7 +188,7 @@ async def perform_recursive_web_searches(
                 raw_text = parse_html_to_text(file_path)
                 if not raw_text or not raw_text.strip():
                     skip_msg = f"Skipping empty page content from {url}"
-                    print(f"[INFO] {skip_msg}")
+                    logger.info(skip_msg) # <<< Use logger
                     send_progress(progress_callback, "log", {"level": "info", "message": skip_msg})
                     continue
 
@@ -211,7 +215,7 @@ async def perform_recursive_web_searches(
                 else:
                     warn_msg = f"Failed to embed page content from '{url}'. Skipping."
                     send_progress(progress_callback, "log", {"level": "warning", "message": warn_msg})
-                    print(f"[WARN] {warn_msg}")
+                    logger.warning(warn_msg) # <<< Use logger
 
             # End phase for processing downloaded pages
             send_progress(progress_callback, "phase_end", {"phase": "web_search_process", "message": f"Finished processing {len(pages)} pages."})
@@ -278,21 +282,23 @@ async def perform_recursive_web_searches(
                     send_progress(progress_callback, "toc_update", {"node_id": toc_node.node_id, "content_relevance": f"{content_relevance:.2f}"})
 
                     if content_relevance < min_relevance:
-                        skip_msg = f"Skipping deeper search (low content relevance {content_relevance:.2f}): '{sq_clean[:50]}...'"
-                        send_progress(progress_callback, "log", {"level": "info", "message": skip_msg})
-                        print(f"[INFO] Skipping deeper search for '{sq_clean}' due to low content relevance ({content_relevance:.2f} < {min_relevance}).")
+                        skip_msg = f"Skipping deeper search for '{sq_clean}' due to low content relevance ({content_relevance:.2f} < {min_relevance})."
+                        send_progress(progress_callback, "log", {"level": "info", "message": f"Skipping deeper search (low content relevance {content_relevance:.2f}): '{sq_clean[:50]}...'"})
+                        logger.info(skip_msg) # <<< Use logger
                         proceed_with_recursion = False
                     else:
                          pass_msg = f"Content relevance check passed ({content_relevance:.2f}) for '{sq_clean[:50]}...'"
                          send_progress(progress_callback, "log", {"level": "info", "message": pass_msg})
+                         logger.debug(pass_msg) # <<< Use logger (debug level)
                 else:
                     warn_msg = f"Failed to embed summary for content relevance check: '{sq_clean[:50]}...'"
                     send_progress(progress_callback, "log", {"level": "warning", "message": warn_msg})
-                    print(f"[WARN] {warn_msg}")
+                    logger.warning(warn_msg) # <<< Use logger
                     # Decide if failure to embed summary should halt recursion (optional, currently allows recursion)
             else:
                 skip_msg = f"Skipping content relevance check (empty summary): '{sq_clean[:50]}...'"
                 send_progress(progress_callback, "log", {"level": "info", "message": skip_msg})
+                logger.info(skip_msg) # <<< Use logger
                 # Decide if empty summary should halt recursion (optional, currently allows recursion)
             # --- End Content Relevance Check ---
 
@@ -344,7 +350,7 @@ async def perform_recursive_web_searches(
                 if cancellation_check_callback and cancellation_check_callback():
                     cancel_msg = "Cancellation requested before recursive web call."
                     send_progress(progress_callback, "log", {"level": "info", "message": cancel_msg})
-                    print(f"[INFO] {cancel_msg}")
+                    logger.info(cancel_msg) # <<< Use logger
                     raise asyncio.CancelledError("Search cancelled by user before recursive web call")
                 # --- End Cancellation Check ---
 
@@ -382,14 +388,14 @@ async def perform_recursive_web_searches(
 
         except asyncio.CancelledError:
              # Propagate cancellation upwards
-             print(f"[INFO] Cancellation caught in web_recursive loop for '{sq_clean}'.")
+             logger.info(f"Cancellation caught in web_recursive loop for '{sq_clean}'.") # <<< Use logger
              if toc_node: # If node was created before cancellation
                  toc_node.status = TOCNode.STATUS_SKIPPED # Or maybe a new 'Cancelled' status?
                  send_progress(progress_callback, "toc_update", {"node_id": toc_node.node_id, "status": toc_node.status, "message": "Cancelled"})
              raise # Re-raise to stop further processing
         except Exception as e:
             err_msg = f"Error processing subquery '{sq_clean}': {e}"
-            print(f"[ERROR] {err_msg}\n{traceback.format_exc()}")
+            logger.error(f"{err_msg}\n{traceback.format_exc()}") # <<< Use logger
             send_progress(progress_callback, "log", {"level": "error", "message": f"Failed processing branch: '{sq_clean[:50]}...': {e}"})
             if toc_node: # If node was created before error
                 toc_node.status = TOCNode.STATUS_ERROR

@@ -6,7 +6,8 @@ from urllib.robotparser import RobotFileParser
 import logging
 import time
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s') # Remove basicConfig
+logger = logging.getLogger(__name__) # <<< Get logger
 
 DEFAULT_USER_AGENT = "NanoSageScraper/1.0"
 
@@ -26,7 +27,7 @@ def can_fetch(url: str, user_agent: str = DEFAULT_USER_AGENT, respect_robots: bo
         rp.read()
         return rp.can_fetch(user_agent, url)
     except Exception as e:
-        logging.warning(f"Could not fetch or parse robots.txt from {robots_url}: {e}")
+        logger.warning(f"Could not fetch or parse robots.txt from {robots_url}: {e}", exc_info=True) # <<< Use logger
         # Be cautious: if robots.txt is inaccessible or malformed, assume fetching is not allowed.
         # Alternatively, you could default to True, but that's less polite.
         return False
@@ -52,14 +53,14 @@ def scrape_url_to_markdown(
         If failed, markdown_content is None, and error_message contains the reason.
     """
     if respect_robots:
-        logging.info(f"Checking robots.txt for {url}")
+        logger.info(f"Checking robots.txt for {url}") # <<< Use logger
         if not can_fetch(url, user_agent, respect_robots):
             error_msg = f"Scraping disallowed by robots.txt for {url}"
-            logging.warning(error_msg)
+            logger.warning(error_msg) # <<< Use logger
             return None, error_msg
 
     headers = {'User-Agent': user_agent}
-    logging.info(f"Attempting to fetch URL: {url}")
+    logger.info(f"Attempting to fetch URL: {url}") # <<< Use logger
 
     try:
         response = requests.get(url, headers=headers, timeout=timeout)
@@ -69,10 +70,10 @@ def scrape_url_to_markdown(
         content_type = response.headers.get('content-type', '').lower()
         if 'html' not in content_type:
             error_msg = f"Skipping non-HTML content ({content_type}) at {url}"
-            logging.warning(error_msg)
+            logger.warning(error_msg) # <<< Use logger
             return None, error_msg
 
-        logging.info(f"Successfully fetched {url}. Parsing HTML...")
+        logger.info(f"Successfully fetched {url}. Parsing HTML...") # <<< Use logger
         soup = BeautifulSoup(response.content, 'lxml') # Use lxml for speed
 
         # --- Content Extraction Heuristic ---
@@ -89,7 +90,7 @@ def scrape_url_to_markdown(
             else:
                 # If no body tag, something is very wrong
                  error_msg = f"Could not find <body> tag in HTML from {url}"
-                 logging.error(error_msg)
+                 logger.error(error_msg) # <<< Use logger
                  return None, error_msg
 
         # Convert the selected HTML content to Markdown
@@ -98,32 +99,36 @@ def scrape_url_to_markdown(
 
         if not markdown_content.strip():
              error_msg = f"Extracted content is empty after processing {url}"
-             logging.warning(error_msg)
+             logger.warning(error_msg) # <<< Use logger
              return None, error_msg
 
-        logging.info(f"Successfully extracted and converted content from {url} to Markdown.")
+        logger.info(f"Successfully extracted and converted content from {url} to Markdown.") # <<< Use logger
         return markdown_content.strip(), None
 
     except requests.exceptions.RequestException as e:
         error_msg = f"Request failed for {url}: {e}"
-        logging.error(error_msg)
+        logger.error(error_msg, exc_info=True) # <<< Use logger with traceback
         return None, error_msg
     except Exception as e:
         error_msg = f"An unexpected error occurred while processing {url}: {e}"
-        logging.error(error_msg, exc_info=True) # Include traceback for unexpected errors
+        logger.error(error_msg, exc_info=True) # <<< Use logger with traceback
         return None, error_msg
 
+# Keep the __main__ block for testing, but use logger here too
 if __name__ == '__main__':
     # Example Usage (for testing)
+    # Setup basic logging just for this test run if needed
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     test_url = "https://example.com" # Replace with a real URL for testing
-    print(f"Attempting to scrape: {test_url}")
+    logger.info(f"Attempting to scrape: {test_url}") # <<< Use logger
     markdown, error = scrape_url_to_markdown(test_url, respect_robots=True)
 
     if error:
-        print(f"\nError: {error}")
+        logger.error(f"Scraping failed: {error}") # <<< Use logger
     elif markdown:
-        print("\n--- Scraped Markdown ---")
+        logger.info("--- Scraped Markdown ---") # <<< Use logger
+        # Print markdown content directly for testing visibility
         print(markdown)
-        print("------------------------")
+        logger.info("------------------------") # <<< Use logger
     else:
-        print("\nNo content returned and no specific error.")
+        logger.warning("No content returned and no specific error.") # <<< Use logger

@@ -30,6 +30,8 @@ from PyQt6.QtGui import QAction # Import QAction for menu items
 # Import the selector widget (though it's created in ui_setup, we need its type potentially)
 # from .ui_components.searxng_selector import SearxngEngineSelector # Not strictly needed here if only interacting via ui_setup attributes
 
+logger = logging.getLogger(__name__) # <<< Get logger
+
 # --- Main Window ---
 
 class MainWindow(QMainWindow):
@@ -605,6 +607,8 @@ class MainWindow(QMainWindow):
     # log_status remains here as it directly interacts with the UI element
     def log_status(self, message):
         """Append a message to the status log."""
+        # Log to logger as well
+        logger.info(f"GUI Status: {message}") # <<< Use logger
         self.status_log.append(message)
         self.status_log.verticalScrollBar().setValue(self.status_log.verticalScrollBar().maximum()) # Auto-scroll
 
@@ -691,3 +695,94 @@ class MainWindow(QMainWindow):
 
         self.log_status("Exiting application.")
         event.accept()
+
+</final_file_content>
+
+IMPORTANT: For any future changes to this file, use the final_file_content shown above as your reference. This content reflects the current state of the file, including any auto-formatting (e.g., if you used single quotes but the formatter converted them to double quotes). Always base your SEARCH/REPLACE operations on this final version to ensure accuracy.
+
+<environment_details>
+# VSCode Visible Files
+gui/main_window.py
+
+# VSCode Open Tabs
+gui/syntax_highlighter.py
+gui/result_actions.py
+embeddings/factory.py
+README.md
+toc_tree.py
+gui/result_display_manager.py
+gui/ui_setup.py
+gui/search_orchestrator.py
+gui/workers.py
+requirements.txt
+config.yaml.example
+config_utils.py
+gui/config_editor_dialog.py
+main.py
+knowledge_base.py
+search_session.py
+search_logic/web_recursive.py
+search_logic/summarization.py
+search_logic/reporting.py
+llm_providers/tasks.py
+llm_providers/utils.py
+llm_providers/gemini.py
+llm_providers/ollama.py
+llm_providers/openrouter.py
+llm_providers/base.py
+web_scraper.py
+web_search.py
+gui/controller.py
+gui/main_window.py
+.gitignore
+gui/scrape_dialog.py
+
+# Current Time
+4/6/2025, 9:37:44 AM (America/Edmonton, UTC-6:00)
+
+# Current Mode
+ACT MODE
+</environment_details>
+<environment_details>
+# VSCode Visible Files
+gui/main_window.py
+
+# VSCode Open Tabs
+gui/syntax_highlighter.py
+gui/result_actions.py
+embeddings/factory.py
+README.md
+toc_tree.py
+gui/result_display_manager.py
+gui/ui_setup.py
+gui/search_orchestrator.py
+gui/workers.py
+requirements.txt
+config.yaml.example
+config_utils.py
+gui/config_editor_dialog.py
+main.py
+knowledge_base.py
+search_session.py
+search_logic/web_recursive.py
+search_logic/summarization.py
+search_logic/reporting.py
+llm_providers/tasks.py
+llm_providers/utils.py
+llm_providers/gemini.py
+llm_providers/ollama.py
+llm_providers/openrouter.py
+llm_providers/base.py
+web_scraper.py
+web_search.py
+gui/controller.py
+gui/main_window.py
+.gitignore
+gui/scrape_dialog.py
+
+# Current Time
+4/6/2025, 9:38:00 AM (America/Edmonton, UTC-6:00)
+
+# Current Mode
+ACT MODE
+</environment_details>

@@ -4,9 +4,12 @@ import requests
 import json
 import backoff
 from requests.exceptions import HTTPError, RequestException
+import logging # <<< Import logging
 
 # Import the custom backoff handler
 from .base import handle_rate_limit
+
+logger = logging.getLogger(__name__) # <<< Get logger
 
 # --- Model Listing Functions ---
 
@@ -16,7 +19,7 @@ def list_openrouter_models():
     # No API key needed for listing models according to OpenRouter docs as of late 2023/early 2024
     # Re-add key check if required by API in the future.
     # if not api_key:
-    #     print("[ERROR] OPENROUTER_API_KEY environment variable not set (needed for model listing).")
+    #     logger.error("OPENROUTER_API_KEY environment variable not set (needed for model listing).") # <<< Use logger
     #     return None
 
     headers = {
@@ -26,6 +29,7 @@ def list_openrouter_models():
     }
 
     try:
+        logger.debug("Fetching models from OpenRouter API...") # <<< Use logger
         response = requests.get(
             "https://openrouter.ai/api/v1/models",
             headers=headers,
@@ -35,7 +39,7 @@ def list_openrouter_models():
         data = response.json()
 
         if "data" not in data or not isinstance(data["data"], list):
-            print("[WARN] Unexpected response format from OpenRouter /models endpoint.")
+            logger.warning("Unexpected response format from OpenRouter /models endpoint.") # <<< Use logger
             return None
 
         # Filter for models often considered "free tier" (pricing is 0)
@@ -57,16 +61,17 @@ def list_openrouter_models():
                     free_models.append(model_id)
 
         if not free_models:
-            print("[WARN] No free models found on OpenRouter (based on pricing info).")
+            logger.warning("No free models found on OpenRouter (based on pricing info).") # <<< Use logger
             return [] # Return empty list, not None
 
+        logger.info(f"Found {len(free_models)} free models on OpenRouter.") # <<< Use logger
         return sorted(free_models) # Return sorted list of model IDs
 
     except requests.exceptions.RequestException as e:
-        print(f"[ERROR] Failed to fetch OpenRouter models: {e}")
+        logger.error(f"Failed to fetch OpenRouter models: {e}", exc_info=True) # <<< Use logger with traceback
         return None # Indicate failure
     except Exception as e:
-        print(f"[ERROR] Failed to parse OpenRouter models response: {e}")
+        logger.error(f"Failed to parse OpenRouter models response: {e}", exc_info=True) # <<< Use logger with traceback
         return None # Indicate failure
 
 # Removed list_openrouter_embedding_models function
@@ -87,7 +92,7 @@ def call_openrouter(prompt, model="openai/gpt-3.5-turbo", personality=None, open
     # Prioritize passed key, fallback to environment variable
     api_key = openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
     if not api_key:
-        print("[ERROR] OpenRouter API key not provided via parameter or environment variable.")
+        logger.error("OpenRouter API key not provided via parameter or environment variable.") # <<< Use logger
         return "Error: OpenRouter API key not configured."
 
     system_message_content = f"You are a helpful assistant."
@@ -113,6 +118,7 @@ def call_openrouter(prompt, model="openai/gpt-3.5-turbo", personality=None, open
     }
 
     try:
+        logger.debug(f"Calling OpenRouter model '{model}'...") # <<< Use logger
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
@@ -122,6 +128,7 @@ def call_openrouter(prompt, model="openai/gpt-3.5-turbo", personality=None, open
         response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
 
         response_data = response.json()
+        logger.debug(f"OpenRouter response received for model '{model}'.") # <<< Use logger
 
         if "choices" in response_data and len(response_data["choices"]) > 0:
             # Check message structure (can vary slightly)
@@ -130,27 +137,27 @@ def call_openrouter(prompt, model="openai/gpt-3.5-turbo", personality=None, open
             # Handle potential variations if needed
             # elif ... other possible structures ...
             else:
-                 print(f"[WARN] Unexpected OpenRouter response structure: {response_data}")
+                 logger.warning(f"Unexpected OpenRouter response structure: {response_data}") # <<< Use logger
                  return "Error: Unexpected response structure from OpenRouter."
         elif "error" in response_data:
              error_message = response_data["error"].get("message", "Unknown error")
-             print(f"[ERROR] OpenRouter API error: {error_message}")
+             logger.error(f"OpenRouter API error: {error_message}") # <<< Use logger
              return f"Error: OpenRouter API error - {error_message}"
         else:
-            print(f"[WARN] OpenRouter response missing expected 'choices' or 'error': {response_data}")
+            logger.warning(f"OpenRouter response missing expected 'choices' or 'error': {response_data}") # <<< Use logger
             return "Error: Invalid response from OpenRouter."
 
     except HTTPError as e:
         # Re-raise HTTPError so backoff can catch it
-        print(f"[ERROR] OpenRouter API HTTP error: {e.response.status_code} - {e}")
+        logger.error(f"OpenRouter API HTTP error: {e.response.status_code} - {e}", exc_info=True) # <<< Use logger with traceback
         raise e
     except requests.exceptions.RequestException as e:
         # Re-raise RequestException so backoff can catch it
-        print(f"[ERROR] OpenRouter API request failed: {e}")
+        logger.error(f"OpenRouter API request failed: {e}", exc_info=True) # <<< Use logger with traceback
         raise e
     except Exception as e:
         # Catch other potential errors during processing
-        print(f"[ERROR] Failed to process OpenRouter response: {e}")
+        logger.error(f"Failed to process OpenRouter response: {e}", exc_info=True) # <<< Use logger with traceback
         # Don't re-raise generic exceptions unless necessary for backoff
         return f"Error: Failed processing OpenRouter response. Details: {e}"
 

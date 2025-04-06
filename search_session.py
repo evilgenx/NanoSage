@@ -6,6 +6,7 @@ import asyncio
 import random
 import traceback # For more detailed error logging
 import time # For potential delays
+import logging # <<< Import logging
 
 # Import necessary components
 from knowledge_base import KnowledgeBase # Removed Document import
@@ -29,6 +30,9 @@ from search_logic import web_recursive, subquery as subquery_logic, summarizatio
 
 from typing import Optional # Added for type hinting
 from cache_manager import CacheManager # Added import
+from config_utils import DEFAULT_CONFIG # Import defaults for KB init
+
+logger = logging.getLogger(__name__) # <<< Get logger for this module
 
 class SearchSession:
     # Modified __init__ to accept resolved_settings dictionary and cache_manager
@@ -58,7 +62,7 @@ class SearchSession:
 
         # Start Initialization Phase
         send_progress(self.progress_callback, "phase_start", {"phase": "initialization", "message": f"Initializing SearchSession (ID: {self.query_id})..."})
-        print(f"[INFO] Initializing SearchSession for query_id={self.query_id}")
+        logger.info(f"Initializing SearchSession for query_id={self.query_id}") # <<< Use logger
 
         # --- Query Enhancement Removed from __init__ ---
         # The query enhancement step is now handled in the GUI before starting the SearchWorker,
@@ -83,7 +87,7 @@ class SearchSession:
         except (ValueError, ImportError) as e:
             err_msg = f"Failed to create embedder: {e}. Aborting."
             send_progress(self.progress_callback, "error", {"message": err_msg, "details": traceback.format_exc()})
-            print(f"[ERROR] {err_msg}\n{traceback.format_exc()}")
+            logger.error(f"{err_msg}\n{traceback.format_exc()}") # <<< Use logger
             raise # Re-raise the critical error
 
         # --- Initialize KnowledgeBase with the embedder and DB settings ---
@@ -92,6 +96,7 @@ class SearchSession:
 
         if kb_provider == 'chromadb':
             chroma_settings = kb_config.get('chromadb', {})
+            # Use DEFAULT_CONFIG for fallback values
             db_path = chroma_settings.get('path', DEFAULT_CONFIG['knowledge_base']['chromadb']['path'])
             collection_name = chroma_settings.get('collection_name', DEFAULT_CONFIG['knowledge_base']['chromadb']['collection_name'])
             kb_msg = f"Initializing ChromaDB KnowledgeBase (Path: {db_path}, Collection: {collection_name})..."
@@ -107,14 +112,14 @@ class SearchSession:
             except Exception as e:
                  err_msg = f"Failed to initialize ChromaDB KnowledgeBase: {e}. Aborting."
                  send_progress(self.progress_callback, "error", {"message": err_msg, "details": traceback.format_exc()})
-                 print(f"[ERROR] {err_msg}\n{traceback.format_exc()}")
+                 logger.error(f"{err_msg}\n{traceback.format_exc()}") # <<< Use logger
                  raise # Re-raise critical error
         else:
             # Handle other providers or fallback to in-memory if needed
             # For now, raise an error if provider is not chromadb
             err_msg = f"Unsupported knowledge base provider specified in config: '{kb_provider}'. Aborting."
             send_progress(self.progress_callback, "error", {"message": err_msg})
-            print(f"[ERROR] {err_msg}")
+            logger.error(err_msg) # <<< Use logger
             raise ValueError(err_msg)
         # Removed self.model_type, self.model, self.processor storage
 
@@ -122,18 +127,19 @@ class SearchSession:
         query_embed_msg = "Computing embedding for enhanced query..."
         send_progress(self.progress_callback, "status", {"message": query_embed_msg})
         send_progress(self.progress_callback, "log", {"level": "info", "message": query_embed_msg})
-        print("[INFO] Computing embedding for enhanced query...")
+        logger.info("Computing embedding for enhanced query...") # <<< Use logger
         try:
             self.enhanced_query_embedding = self.embedder.embed(self.enhanced_query)
             if self.enhanced_query_embedding is None:
                 # Handle embedding failure
                 err_msg = "Failed to compute initial query embedding (returned None). Aborting."
                 send_progress(self.progress_callback, "error", {"message": err_msg})
+                logger.error(err_msg) # <<< Use logger
                 raise ValueError(err_msg)
         except Exception as e:
              err_msg = f"Exception during initial query embedding: {e}. Aborting."
              send_progress(self.progress_callback, "error", {"message": err_msg, "details": traceback.format_exc()})
-             print(f"[ERROR] {err_msg}\n{traceback.format_exc()}")
+             logger.error(f"{err_msg}\n{traceback.format_exc()}") # <<< Use logger
              raise ValueError(err_msg) from e
 
 
@@ -168,7 +174,7 @@ class SearchSession:
         start_msg = f"Starting search session (Max Depth: {self.resolved_settings['max_depth']})..."
         send_progress(self.progress_callback, "status", {"message": start_msg})
         send_progress(self.progress_callback, "log", {"level": "info", "message": start_msg})
-        print(f"[INFO] Starting session with query_id={self.query_id}, max_depth={self.resolved_settings['max_depth']}")
+        logger.info(f"Starting session with query_id={self.query_id}, max_depth={self.resolved_settings['max_depth']}") # <<< Use logger
         plain_enhanced_query = clean_search_query(self.enhanced_query) # Use clean_search_query from utils
 
         # 1) Generate subqueries from the enhanced query
@@ -227,13 +233,13 @@ class SearchSession:
         else:
             skip_msg = "Web search disabled or max_depth < 1, skipping."
             send_progress(self.progress_callback, "log", {"level": "info", "message": skip_msg})
-            print(f"[INFO] {skip_msg}")
+            logger.info(skip_msg) # <<< Use logger
 
         # 4) Local retrieval (uses the KB's search method)
         # Use resolved top_k
         local_retrieval_msg = f"Retrieving top {self.resolved_settings['top_k']} documents from knowledge base..."
         send_progress(self.progress_callback, "phase_start", {"phase": "local_retrieval", "message": local_retrieval_msg})
-        print(f"[INFO] Retrieving top {self.resolved_settings['top_k']} documents for final answer.")
+        logger.info(f"Retrieving top {self.resolved_settings['top_k']} documents for final answer.") # <<< Use logger
         # KB.search now uses its internal embedder, no need for keys/models
         # KB.search should ideally use send_progress internally
         self.local_results = self.kb.search(
@@ -248,7 +254,7 @@ class SearchSession:
         if self.resolved_settings.get('enable_iterative_search', False) and self.resolved_settings.get('rag_model') != 'None':
             iterative_start_msg = "Iterative search enabled. Analyzing initial results..."
             send_progress(self.progress_callback, "phase_start", {"phase": "iterative_search", "message": iterative_start_msg})
-            print("[INFO] Starting iterative sub-query generation step.")
+            logger.info("Starting iterative sub-query generation step.") # <<< Use logger
 
             # a) Prepare Context Summary (Simple concatenation for now)
             # Combine text from top local results and web results
@@ -263,6 +269,7 @@ class SearchSession:
             if not context_summary_for_llm:
                 warn_msg = "No context found from initial results to generate follow-up queries."
                 send_progress(self.progress_callback, "log", {"level": "warning", "message": warn_msg})
+                logger.warning(warn_msg) # <<< Use logger
             else:
                 # b) Generate Follow-up Queries
                 # Prepare llm_config for the generation task (using RAG model settings)
@@ -336,12 +343,12 @@ class SearchSession:
                                         # send_progress(self.progress_callback, "log", {"level": "debug", "message": f"  Added follow-up content from: {res['href']}"})
                                 except Exception as parse_err:
                                     warn_msg = f"Failed to parse follow-up result from {res.get('href', 'unknown URL')}: {parse_err}"
-                                    print(f"[WARN] {warn_msg}")
+                                    logger.warning(warn_msg, exc_info=True) # <<< Use logger
                                     send_progress(self.progress_callback, "log", {"level": "warning", "message": warn_msg})
 
                         except Exception as search_err:
                             err_msg = f"Failed to execute follow-up search for '{f_query}': {search_err}"
-                            print(f"[ERROR] {err_msg}")
+                            logger.error(err_msg, exc_info=True) # <<< Use logger
                             send_progress(self.progress_callback, "log", {"level": "error", "message": err_msg})
 
                     # End phase for follow-up searches
@@ -371,6 +378,7 @@ class SearchSession:
              if self.resolved_settings.get('enable_iterative_search', False):
                   skip_msg = "Iterative search enabled, but RAG model is 'None'. Skipping follow-up query generation."
                   send_progress(self.progress_callback, "log", {"level": "info", "message": skip_msg})
+                  logger.info(skip_msg) # <<< Use logger
              # else: # Iterative search not enabled, do nothing extra
 
 
@@ -401,7 +409,7 @@ class SearchSession:
             # Pass previous_results_content, follow_up_convo if needed
         )
         send_progress(self.progress_callback, "phase_end", {"phase": "reporting", "message": "Finished building final report."})
-        print("[INFO] Finished building final advanced report.")
+        logger.info("Finished building final advanced report.") # <<< Use logger
         return final_answer
 
     # --- Removed perform_monte_carlo_subqueries ---

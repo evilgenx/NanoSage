@@ -65,8 +65,21 @@ def main():
 
     # --- Setup Logging ---
     log_level = getattr(logging, args.log_level.upper(), logging.INFO)
-    logging.basicConfig(level=log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    logger = logging.getLogger(__name__) # Get logger for main
+    # Configure root logger
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S' # Added date format
+    )
+    # Optional: Add file handler
+    # log_file_path = 'nanosage.log'
+    # file_handler = logging.FileHandler(log_file_path)
+    # file_handler.setLevel(log_level)
+    # file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    # logging.getLogger().addHandler(file_handler) # Add handler to root logger
+
+    logger = logging.getLogger(__name__) # Get logger for main module
+    logger.info(f"--- NanoSage-EG Started (Log Level: {args.log_level}) ---")
 
 
     # --- Load Config and Resolve Settings (Needed for both modes) ---

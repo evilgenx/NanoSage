@@ -124,13 +124,13 @@ async def download_webpages_ddg(keyword, limit=5, output_dir='downloaded_webpage
     
     results_info = []
     if not keyword.strip():
-        print("[WARN] Empty keyword provided to DuckDuckGo search; skipping search.")
+        logger.warning("Empty keyword provided to DuckDuckGo search; skipping search.") # <<< Use logger
         return []
     
     with DDGS() as ddgs:
         results = ddgs.text(keyword, max_results=limit)
     if not results:
-        print(f"[WARN] No results found for '{keyword}'.")
+        logger.warning(f"No results found for '{keyword}'.") # <<< Use logger
         return []
     
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -185,7 +185,7 @@ async def download_webpages_searxng(
     # api_key = searxng_config.get('api_key') # If you needed API key auth
 
     if not base_url:
-        print("[ERROR] SearXNG base_url is not configured in config.yaml.")
+        logger.error("SearXNG base_url is not configured in config.yaml.") # <<< Use logger
         if progress_callback:
             progress_callback("[ERROR] SearXNG base_url is not configured.")
         return []
@@ -196,7 +196,7 @@ async def download_webpages_searxng(
 
     results_info = []
     if not keyword.strip():
-        print("[WARN] Empty keyword provided to SearXNG search; skipping search.")
+        logger.warning("Empty keyword provided to SearXNG search; skipping search.") # <<< Use logger
         return []
 
     # --- Direct API Call Implementation ---
@@ -232,7 +232,7 @@ async def download_webpages_searxng(
     query_string = urlencode(params, quote_via=quote_plus)
     search_url = f"{base_url.rstrip('/')}/search?{query_string}"
 
-    print(f"[INFO] Querying SearXNG API: {search_url}")
+    logger.info(f"Querying SearXNG API: {search_url}") # <<< Use logger
     if progress_callback:
         progress_callback(f"Querying SearXNG API for: '{keyword[:50]}...' (Page {pageno})")
 
@@ -249,32 +249,30 @@ async def download_webpages_searxng(
                 if 'results' in data and isinstance(data['results'], list):
                     search_results_list = data['results']
                 else:
-                    print(f"[WARN] SearXNG JSON response missing 'results' list or not a list. URL: {search_url}")
-                    print(f"[DEBUG] Response data: {data}") # Log the structure for debugging
-
+                    logger.warning(f"SearXNG JSON response missing 'results' list or not a list. URL: {search_url}") # <<< Use logger
+                    logger.debug(f"Response data: {data}") # <<< Use logger
                 if not search_results_list:
-                    print(f"[WARN] No results found via SearXNG API for '{keyword}'. URL: {search_url}")
+                    logger.warning(f"No results found via SearXNG API for '{keyword}'. URL: {search_url}") # <<< Use logger
                     if progress_callback:
                         progress_callback(f"[WARN] No SearXNG results for: '{keyword[:50]}...' (Page {pageno})")
                     return []
 
     except aiohttp.ClientError as e:
         error_message = f"Network error querying SearXNG API '{search_url}': {e}"
-        print(f"[ERROR] {error_message}")
+        logger.error(error_message, exc_info=True) # <<< Use logger with traceback
         if progress_callback:
             progress_callback(f"[ERROR] Network error querying SearXNG.")
         return []
     except json.JSONDecodeError as e:
         error_message = f"Error decoding JSON response from SearXNG API '{search_url}': {e}"
-        print(f"[ERROR] {error_message}")
+        logger.error(error_message, exc_info=True) # <<< Use logger with traceback
         if progress_callback:
             progress_callback(f"[ERROR] Invalid JSON from SearXNG.")
         return []
     except Exception as e:
         # Catch other potential errors (e.g., connection issues, unexpected response structure)
-        # Change 'e' to 'repr(e)' for more detailed error logging
         error_message = f"Error during SearXNG API query for '{keyword}': {repr(e)}"
-        print(f"[ERROR] {error_message}")
+        logger.error(error_message, exc_info=True) # <<< Use logger with traceback
         if progress_callback:
             progress_callback(f"[ERROR] SearXNG query failed: {repr(e)}") # Also add repr(e) here
         return []
@@ -296,7 +294,7 @@ async def download_webpages_searxng(
             # Extract URL - common keys are 'url', 'link'. Prioritize 'url'.
             url = result.get("url") or result.get("link")
             if not url:
-                print(f"[WARN] SearXNG result missing 'url' or 'link': {result}")
+                logger.warning(f"SearXNG result missing 'url' or 'link': {result}") # <<< Use logger
                 continue
 
             # Determine file extension from URL
@@ -317,7 +315,7 @@ async def download_webpages_searxng(
             count += 1 # Increment count based on successfully processed results with a URL
 
         if not tasks:
-            print("[INFO] No valid URLs found in SearXNG results to download.")
+            logger.info("No valid URLs found in SearXNG results to download.") # <<< Use logger
             return []
 
         pages = await asyncio.gather(*tasks)
@@ -343,19 +341,19 @@ def parse_pdf_to_text(pdf_file_path, max_pages=10):
             if page_text:
                 text += page_text + "\n"
         if text.strip():
-            print(f"[INFO] Extracted text from PDF: {pdf_file_path}")
+            logger.info(f"Extracted text from PDF: {pdf_file_path}") # <<< Use logger
             return text
         else:
-            print(f"[INFO] No text found in PDF: {pdf_file_path}, converting pages to images")
+            logger.info(f"No text found in PDF: {pdf_file_path}, converting pages to images") # <<< Use logger
             for i in range(min(max_pages, doc.page_count)):
                 page = doc.load_page(i)
                 pix = page.get_pixmap()
                 image_file = pdf_file_path.replace('.pdf', f'_page_{i+1}.png')
                 pix.save(image_file)
-                print(f"[INFO] Saved page {i+1} as image: {image_file}")
+                logger.info(f"Saved page {i+1} as image: {image_file}") # <<< Use logger
             return ""
     except Exception as e:
-        print(f"[WARN] Failed to parse PDF {pdf_file_path}: {e}")
+        logger.warning(f"Failed to parse PDF {pdf_file_path}: {e}", exc_info=True) # <<< Use logger with traceback
         return ""
 
 def parse_html_to_text(file_path, max_pdf_pages=10):
@@ -374,7 +372,7 @@ def parse_html_to_text(file_path, max_pdf_pages=10):
             tag.decompose()
         return soup.get_text(separator=' ', strip=True)
     except Exception as e:
-        print(f"[WARN] Failed to parse HTML {file_path}: {e}")
+        logger.warning(f"Failed to parse HTML {file_path}: {e}", exc_info=True) # <<< Use logger with traceback
         return ""
 
 def group_web_results_by_domain(web_results):
